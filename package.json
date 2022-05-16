@@ -5,8 +5,9 @@
   "main": "compote.js",
   "type": "module",
   "scripts": {
-    "all": "node compote.js --all",
+    "all": "node compote --all",
     "dev": "node compote --dev",
+    "build": "node builder",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "",
@@ -17,6 +18,9 @@
     },
     "#compiled/*": {
       "default": "./compiled/*"
+    },
+    "#public/*": {
+      "default": "./public/*"
     }
   }
 }

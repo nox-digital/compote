@@ -29,11 +29,8 @@ const defaultOptions = {
         port: process.env.PORT ?? 8080,
         paths: {
             cache: './cache',
-            public: '../../public',
-            templates: '../templates',
-            builder: '../builder',
-            components: '../builder/components',
-            pages: '../builder/components/pages',
+            public: './public',
+            templates: './templates',
         },
         routes: [
             { match: /^index\.html$/, page: 'HomePage' },
