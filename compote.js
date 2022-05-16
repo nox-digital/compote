@@ -30,6 +30,8 @@ const defaultOptions = {
         paths: {
             cache: './cache',
             public: './public',
+            componentCompiled: './compiled',
+            templates: './components',
         },
         routes: [
             { match: /^index\.html$/, page: 'HomePage' },
@@ -332,7 +334,7 @@ async function start(filePath, out) {
 
     // Récupère les chemins des composants existants sur le disque et leur template 
     const paths = defaultOptions.server.paths
-    const components = await findComponentFiles(paths.components)
+    const componentCompiled = await findComponentFiles(paths.componentCompiled)
     const templates = await findComponentFiles(paths.templates)
 
     // Compile tous les templates trouvés
@@ -340,8 +342,7 @@ async function start(filePath, out) {
         for (const name in templates) {
             if ('html' in templates[name]) {
                 const html = `${templates[name].html}`
-                const outfile = html.replace(paths.templates, paths.components)
-                                .replace('.html', '.tpl.mjs')
+                const outfile = html.replace(paths.templates, paths.components).replace('.html', '.tpl.mjs')
                 console.log(`\nCOMPILE: `, html, outfile)
                 await start(html, outfile)
             }
@@ -449,8 +450,8 @@ async function start(filePath, out) {
 
     // Gère les chemins d'accès à ses composants
     for (const dep in dependencies) {
-        dependencies[dep] = components[dep]?.mjs.replace(paths.components, '#components')
-        if (!components[dep]) {
+        dependencies[dep] = componentCompiled[dep]?.mjs.replace(paths.componentCompiled, '#compiled')
+        if (!componentCompiled[dep]) {
             console.warn(`\x1b[31mDependence ${dep} not found\x1b[0m `)
             delete dependencies[dep]
         }

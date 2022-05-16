@@ -5,6 +5,7 @@
   "main": "compote.js",
   "type": "module",
   "scripts": {
+    "compile": "node compote",
     "all": "node compote --all",
     "dev": "node compote --dev",
     "build": "node builder",
