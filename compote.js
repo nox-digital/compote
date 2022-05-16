@@ -30,7 +30,6 @@ const defaultOptions = {
         paths: {
             cache: './cache',
             public: './public',
-            templates: './templates',
         },
         routes: [
             { match: /^index\.html$/, page: 'HomePage' },
