@@ -1,0 +1,22 @@
+{
+  "name": "compote",
+  "version": "1.0.0",
+  "description": "",
+  "main": "compote.js",
+  "type": "module",
+  "scripts": {
+    "all": "node compote.js --all",
+    "dev": "node compote --dev",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "imports": {
+    "#components/*": {
+      "default": "./components/*"
+    },
+    "#compiled/*": {
+      "default": "./compiled/*"
+    }
+  }
+}
