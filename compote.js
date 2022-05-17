@@ -343,7 +343,7 @@ BUILD:
     By file with optional JSON parameters:
     node compote --build ./compiled/Component.tpl.mjs ./build/index.html {}
 
-    All pages:
+    Build all pages, based on .env file or folder:
     node compote --build-pages ./compiled/ ./build/
 
 
@@ -483,9 +483,10 @@ DEVELOPMENT:
     // Génère le source de sortie
     const opt = { depth: Infinity, colors: false }
     const rawScript = compiled.script.replaceAll('`', '\\`').replaceAll('${', '\\${')
+    // compiled: '${(new Date).toISOString()}|v0.8',
     let output = `export default class ${name} {
     static ___ = {
-        compiled: '${(new Date).toISOString()}|v0.8',
+        compote: 220517,
         component: ${name},
         dependencies: ${inspect(dependencies, opt)},
         param: ${inspect(compiled.param, opt)},
