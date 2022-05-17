@@ -30,8 +30,6 @@ const defaultOptions = {
         paths: {
             cache: './cache',
             public: './public',
-            componentCompiled: './compiled',
-            templates: './components',
         },
         routes: [
             { match: /^index\.html$/, page: 'HomePage' },
@@ -304,7 +302,8 @@ async function build(component, attributes, response) {
 
 
 
-async function start(filePath, out) {
+// async function start(filePath, out) {
+async function start(args=[], options=[]) {
 
     // Initialisation
     compiled.param = {}
@@ -322,37 +321,21 @@ async function start(filePath, out) {
     forStack.length = 0
     
 
-    if (!filePath) {
+    if (!args.length) {
         console.log(`node compiler <MyComp>(.html) (<MyComp.tpl.mjs>)`)
         console.log(`node compiler ./path/MyComp                  => read MyComp.html and write to MyComp.tpl.mjs`)
         console.log(`node compiler ./path/MyComp.html tpl.mjs     => read MyComp.html and write to MyComp.tpl.mjs`)
         console.log('options:')
-        console.log(`--all                                        => Compile all compnenents`)
         console.log(`--dev                                        => Developer with server and auto-compile detected files changes`)
         process.exit(1)
     }
 
     // Récupère les chemins des composants existants sur le disque et leur template 
     const paths = defaultOptions.server.paths
-    const componentCompiled = await findComponentFiles(paths.componentCompiled)
-    const templates = await findComponentFiles(paths.templates)
-
-    // Compile tous les templates trouvés
-    if (filePath === '--all') {
-        for (const name in templates) {
-            if ('html' in templates[name]) {
-                const html = `${templates[name].html}`
-                const outfile = html.replace(paths.templates, paths.components).replace('.html', '.tpl.mjs')
-                console.log(`\nCOMPILE: `, html, outfile)
-                await start(html, outfile)
-            }
-        }
-        return
-    }
 
 
     // Serveur de dév avec auto-compilation à la détection de changement de fichiers
-    if (filePath === '--dev') {
+    if (options.includes('--dev')) {
 
         http = (await import('http')).default
         https = (await import('https')).default
@@ -371,7 +354,7 @@ async function start(filePath, out) {
             console.log(`file ${filepath} ${eventType}`)
             clearTimeout(dedup[filepath])
             dedup[filepath] = setTimeout(() => { 
-                start(filepath, filepath.replace(paths.templates, paths.components).replace('.html', '.tpl.mjs'))
+                start([ filepath, filepath.replace(paths.templates, paths.components).replace('.html', '.tpl.mjs') ])
             })
         }
 
@@ -400,20 +383,36 @@ async function start(filePath, out) {
     }
 
 
-    // Compilation d'un fichier explicite
-    console.log(`Compilation of ${filePath} -> ${out}`)
+    // Compilation d'une source explicite
+    const [ src, out ] = args.filter(a => !a.startsWith('--'))
+    const tasks = []
+    if (src.at(-1) === '/' || src.indexOf('.') === -1) {
+
+        const templates = await findComponentFiles(src.at(-1) === '/' ? src.slice(0, -1) : src)
+        for (const name in templates) {
+            if ('html' in templates[name]) {
+                const html = `${templates[name].html}`
+                const outfile = `${out}/${name}.tpl.mjs`.replaceAll('//', '/')
+                await start([ html, outfile ])
+            }
+        }
+        return
+    }
+    
+    // Fichier source => out
+    console.log(`Compilation of ${src} -> ${out}`)
 
     // Prépare les variables
     for (const d in dependencies) delete dependencies[d]
 
 
-    const idx = { lastSlash: filePath.lastIndexOf('/') }
-    const name = idx.lastSlash > -1 ? filePath.replace('.html', '').slice(idx.lastSlash + 1) : filePath
-    const path = idx.lastSlash > -1 ? filePath.slice(0, idx.lastSlash) : './'
+    const idx = { lastSlash: src.lastIndexOf('/') }
+    const name = idx.lastSlash > -1 ? src.replace('.html', '').slice(idx.lastSlash + 1) : src
+    const path = idx.lastSlash > -1 ? src.slice(0, idx.lastSlash) : './'
 
     // Lit le fichier HTML
-    const file = await fs.readFile(filePath.replace('.html', '') + '.html', { encoding: 'utf-8' })
-        .catch(e => exit(`can't read the file ${filePath}.html !`, e))
+    const file = await fs.readFile(src.replace('.html', '') + '.html', { encoding: 'utf-8' })
+        .catch(e => exit(`can't read the file ${src}.html !`, e))
 
 
     // Sépare les sections
@@ -450,11 +449,9 @@ async function start(filePath, out) {
 
     // Gère les chemins d'accès à ses composants
     for (const dep in dependencies) {
-        dependencies[dep] = componentCompiled[dep]?.mjs.replace(paths.componentCompiled, '#compiled')
-        if (!componentCompiled[dep]) {
-            console.warn(`\x1b[31mDependence ${dep} not found\x1b[0m `)
-            delete dependencies[dep]
-        }
+        dependencies[dep] = `#compiled/${dep}.tpl.mjs`
+        // const exists = await fs.stat(dependencies[dep])
+            // .catch(e => console.warn(`\x1b[31mDependence ${dep} not found\x1b[0m `))
     }
 
     // Génère le source de sortie
@@ -494,7 +491,7 @@ async function start(filePath, out) {
     Object.keys(compiled).forEach((k,i) => compiled[i] = null)
 
     // Destination
-    const outputFile = out || filePath.replace('.html', '') + '.tpl.mjs'
+    const outputFile = out || src.replace('.html', '') + '.tpl.mjs'
     const outputPath = outputFile.slice(0, outputFile.lastIndexOf('/'))
 
     // Vérifie l'existence ou crée le chemin de destination
@@ -1482,5 +1479,8 @@ function mergeObjects(set, defaults) {
 
 
 
-const [ , , filePath, out ] = process.argv
-start(filePath, out)
+const args = process.argv.slice(2)
+const options = args.filter(a => a.startsWith('--'))
+start(args, options)
+// const [ , , filePath, out ] = process.argv
+// start(filePath, out)
