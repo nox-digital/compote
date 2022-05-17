@@ -97,7 +97,7 @@ class Slot {
 
 function exit(error, details, code = 1) {
     console.dir({ error, details }, { depth: Infinity})
-    if (process.argv[2] === '--dev') {
+    if (process.argv.includes('--dev')) {
         console.log('________________________________________')
         return
     }
@@ -322,11 +322,36 @@ async function start(args=[], options=[]) {
     
 
     if (!args.length) {
-        console.log(`node compiler <MyComp>(.html) (<MyComp.tpl.mjs>)`)
-        console.log(`node compiler ./path/MyComp                  => read MyComp.html and write to MyComp.tpl.mjs`)
-        console.log(`node compiler ./path/MyComp.html tpl.mjs     => read MyComp.html and write to MyComp.tpl.mjs`)
-        console.log('options:')
-        console.log(`--dev                                        => Developer with server and auto-compile detected files changes`)
+        console.log(`
+COMPILATION:
+------------
+    node compote <source> <destination> [options]
+
+    By component:
+    node compote ./src/Component.html ./compiled/Component.tpl.mjs
+
+    By folder:
+    node compote ./src/ ./compiled/
+
+    By folder with auto-compilation on detected changes: 
+    node compote ./src/ ./compiled/ --watch
+
+
+BUILD:
+------
+
+    By file with optional JSON parameters:
+    node compote --build ./compiled/Component.tpl.mjs {}
+
+    All pages:
+    node compote --build-pages ./compiled/ ./build/
+
+
+DEVELOPMENT:
+------------
+    Development web server with auto-compilation and building based on .env file or folder:
+    node compote --dev ./src/ ./compiled/
+        `)
         process.exit(1)
     }
 
