@@ -370,10 +370,11 @@ DEVELOPMENT:
             if (!['.html', '.css', '.js', '.mjs'].includes(ext)) return
 
             const filepath = `${dir}/${file.replace('.css', '.html').replace('.js', '.html')}`
-            console.log(`file ${filepath} ${eventType}`)
             clearTimeout(dedup[filepath])
             dedup[filepath] = setTimeout(() => { 
-                start([ filepath, filepath.replace(paths.templates, paths.components).replace('.html', '.tpl.mjs') ])
+                console.log(`\nfile ${filepath} ${eventType}`)
+                const outfile = `${out}/${file.replace('.html', '.tpl.mjs')}`.replaceAll('//', '/')
+                start([ filepath, outfile ]) //filepath.replace(paths.templates, paths.components).replace('.html', '.tpl.mjs') ])
             })
         }
 
