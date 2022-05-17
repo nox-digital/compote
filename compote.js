@@ -4,6 +4,8 @@ const customInspectSymbol = Symbol.for('nodejs.util.inspect.custom')
 
 let http, https, Path, fsSync, execFileSync
 
+
+const compoteVersion = 220517
 const defaultOptions = {
     syntax: {
 
@@ -369,11 +371,12 @@ DEVELOPMENT:
             const ext = file.slice(file.indexOf('.'))
             if (!['.html', '.css', '.js', '.mjs'].includes(ext)) return
 
-            const filepath = `${dir}/${file.replace('.css', '.html').replace('.js', '.html')}`
+            const name = file.split('.')[0]
+            const filepath = `${dir}/${name}.html`
             clearTimeout(dedup[filepath])
             dedup[filepath] = setTimeout(() => { 
-                console.log(`\nfile ${filepath} ${eventType}`)
-                const outfile = `${out}/${file.replace('.html', '.tpl.mjs')}`.replaceAll('//', '/')
+                console.log(`\ncomponent ${name}${ext} ${eventType}`)
+                const outfile = `${out}/${name}.tpl.mjs`.replaceAll('//', '/')
                 start([ filepath, outfile ]) //filepath.replace(paths.templates, paths.components).replace('.html', '.tpl.mjs') ])
             })
         }
@@ -481,13 +484,23 @@ DEVELOPMENT:
             // .catch(e => console.warn(`\x1b[31mDependence ${dep} not found\x1b[0m `))
     }
 
+    // Vérifie s'il y a un fichier .mjs associé et l'inclus dans le code
+    const mjs = await fs.readFile(src.replace('.html', '.mjs'), { encoding: 'utf-8' })
+        .catch(e => null)
+
+    const idxBracket = mjs ? mjs.indexOf('{') : -1
+    if (mjs && !idxBracket) {
+        console.error(`${name}.mjs doesn't include the first export bracket « { »`)
+    }
+    const extend = mjs && idxBracket > -1 ? mjs.slice(idxBracket + 1, mjs.lastIndexOf('}')) : ''
+
     // Génère le source de sortie
     const opt = { depth: Infinity, colors: false }
     const rawScript = compiled.script.replaceAll('`', '\\`').replaceAll('${', '\\${')
     // compiled: '${(new Date).toISOString()}|v0.8',
     let output = `export default class ${name} {
     static ___ = {
-        compote: 220517,
+        compote: ${compoteVersion},
         component: ${name},
         dependencies: ${inspect(dependencies, opt)},
         param: ${inspect(compiled.param, opt)},
@@ -515,7 +528,7 @@ DEVELOPMENT:
 
         this['…extra'] = Object.keys(attributes).filter(a => a !== '/' && !(a in ${name}.___.param)).map(a => \`\${a}=\${attributes[a]}\`).join(' ')
         this['…${name}'] = slot
-    }\n}`
+    }\n${extend}}`
     Object.keys(compiled).forEach((k,i) => compiled[i] = null)
 
     // Destination
