@@ -333,15 +333,15 @@ COMPILATION:
     By folder:
     node compote ./src/ ./compiled/
 
-    By folder with auto-compilation on detected changes: 
-    node compote ./src/ ./compiled/ --watch
+    Compile folder and watch changes to auto-compilation: 
+    node compote --watch ./src/ ./compiled/
 
 
 BUILD:
 ------
 
     By file with optional JSON parameters:
-    node compote --build ./compiled/Component.tpl.mjs {}
+    node compote --build ./compiled/Component.tpl.mjs ./build/index.html {}
 
     All pages:
     node compote --build-pages ./compiled/ ./build/
@@ -355,25 +355,19 @@ DEVELOPMENT:
         process.exit(1)
     }
 
-    // Récupère les chemins des composants existants sur le disque et leur template 
+    const [ src, out ] = args.filter(a => !a.startsWith('--'))
     const paths = defaultOptions.server.paths
 
-
-    // Serveur de dév avec auto-compilation à la détection de changement de fichiers
-    if (options.includes('--dev')) {
-
-        http = (await import('http')).default
-        https = (await import('https')).default
-        Path = (await import('path')).default
-        fsSync = (await import('fs')).default
-        execFileSync = (await import('child_process')).execFileSync
+    // Auto-compilation
+    if (options.includes('--watch') || options.includes('--dev')) {
 
         const dedup = {}
+        fsSync = (await import('fs')).default
 
         const onchange = (dir, eventType, file) => {
             if (eventType !== 'change') return
             const ext = file.slice(file.indexOf('.'))
-            if (!['.html', '.css', '.js'].includes(ext)) return
+            if (!['.html', '.css', '.js', '.mjs'].includes(ext)) return
 
             const filepath = `${dir}/${file.replace('.css', '.html').replace('.js', '.html')}`
             console.log(`file ${filepath} ${eventType}`)
@@ -383,12 +377,21 @@ DEVELOPMENT:
             })
         }
 
-        const directories = await directoryTree(paths.templates)
+        const directories = await directoryTree(src.at(-1) === '/' ? src.slice(0, -1) : src)
         for (const dir of directories) {
             console.log('watch directory ', dir)
             fsSync.watch(dir, (ev, file) => onchange(dir, ev, file))
         }
+    }
 
+
+    // Serveur de dév avec auto-compilation à la détection de changement de fichiers
+    if (options.includes('--dev')) {
+
+        http = (await import('http')).default
+        https = (await import('https')).default
+        Path = (await import('path')).default
+        execFileSync = (await import('child_process')).execFileSync
 
         // Lit le fichier d'environnement
         if (process.env.ENV) {
@@ -409,8 +412,6 @@ DEVELOPMENT:
 
 
     // Compilation d'une source explicite
-    const [ src, out ] = args.filter(a => !a.startsWith('--'))
-    const tasks = []
     if (src.at(-1) === '/' || src.indexOf('.') === -1) {
 
         const templates = await findComponentFiles(src.at(-1) === '/' ? src.slice(0, -1) : src)
