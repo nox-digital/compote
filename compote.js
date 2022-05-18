@@ -277,7 +277,7 @@ async function build(component, attributes, response) {
             const [ , , component, attributesJSON ] = process.argv
             const attributes = JSON.parse(attributesJSON)
 
-            const Builder = (await import('#components/ComponentBuilder.mjs')).default
+            const Builder = (await import('#compiled/ComponentBuilder.mjs')).default
             const RequestedComponent = (await import(component)).default
             const {parentPort, workerData} = (await import('worker_threads'))
 
@@ -291,7 +291,6 @@ async function build(component, attributes, response) {
             const requestedComponent = new RequestedComponent(state, attributes)        
             output = await Builder.build(state, requestedComponent)
             parentPort.postMessage(output)
-            // console.log({ body: output.length })
         }
         build()
     `
@@ -357,7 +356,7 @@ DEVELOPMENT:
         process.exit(1)
     }
 
-    const [ src, out ] = args.filter(a => !a.startsWith('--'))
+    const [ src, out, json ] = args.filter(a => !a.startsWith('--'))
     const paths = defaultOptions.server.paths
 
     // Auto-compilation
@@ -415,8 +414,23 @@ DEVELOPMENT:
     }
 
 
+    // Construction d'un composant compilé à un fichier .html
+    if (options.includes('--build')) {
+        if (!src) exit(`Missing compiled component source to build`)
+        if (!out || ['"', "'", '{'].includes(out.at(0))) exit(`Missing HTML file destination to build`)
+        console.log(`construction du composant ${src} => ${out}`)
+        let attributes = {}
+        try { attributes = JSON.parse(json) }
+        catch (e) { exit(`Error when parsing JSON parameters: ${e}`) }
+        await build(src, attributes)
+        return
+    }
+
+
+
     // Compilation d'une source explicite
-    if (src.at(-1) === '/' || src.indexOf('.') === -1) {
+    const srcFolder = (src.at(-1) === '/' || src.indexOf('.') === -1)
+    if (srcFolder) {
 
         const templates = await findComponentFiles(src.at(-1) === '/' ? src.slice(0, -1) : src)
         for (const name in templates) {
