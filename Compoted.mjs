@@ -1,4 +1,4 @@
-export default class ComponentBuilder {
+export default class Compoted {
 
     static options = {
         encode: {

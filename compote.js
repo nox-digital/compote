@@ -32,6 +32,7 @@ const defaultOptions = {
         paths: {
             cache: './cache',
             public: './public',
+            pages: 'pages',
         },
         routes: [
             { match: /^index\.html$/, page: 'HomePage' },
@@ -151,7 +152,7 @@ async function server(request, response) {
     const ssr = (route) => {
 
         // Vérifie que le chemin indiqué par la route existe puis l'importe
-        const componentPath = `${defaultOptions.server.paths.pages}/${route.page}.mjs`
+        const componentPath = `${defaultOptions.server.paths.componentPages}/${route.page}.tpl.mjs`
         if (!fsSync.existsSync(componentPath)) {
             console.error(`Component « ${route.page} » not found`, { url, route, componentPath })
             response.writeHead(418)
@@ -243,9 +244,8 @@ async function server(request, response) {
 
 const envFile = async (filename) => {
     const readFile = (await import('fs/promises')).readFile
-    console.log(`inject ${filename}`)
     const env = await readFile(filename, { encoding: 'utf-8' })
-        .catch(e => console.error(`\x1b[31mEnvironment file « ${filename} » not found\x1b[0m`))
+        .catch(e => exit(`\x1b[31mEnvironment file « ${filename} » not found\x1b[0m`))
     
     const lines = env.trim().split("\n")
     for (const l of lines) {
@@ -277,7 +277,7 @@ async function build(component, attributes, response) {
             const [ , , component, attributesJSON ] = process.argv
             const attributes = JSON.parse(attributesJSON)
 
-            const Builder = (await import('#compiled/ComponentBuilder.mjs')).default
+            const Builder = (await import('./Compoted.mjs')).default
             const RequestedComponent = (await import(component)).default
             const {parentPort, workerData} = (await import('worker_threads'))
 
@@ -321,8 +321,9 @@ async function start(args=[], options=[]) {
     for (const k in routes) delete routes[k]
     forStack.length = 0
     
+    const [ src, out, json ] = args.filter(a => !a.startsWith('--'))
 
-    if (!args.length) {
+    if (!args.length || !src || !out) {
         console.log(`
 COMPILATION:
 ------------
@@ -356,7 +357,6 @@ DEVELOPMENT:
         process.exit(1)
     }
 
-    const [ src, out, json ] = args.filter(a => !a.startsWith('--'))
     const paths = defaultOptions.server.paths
 
     // Auto-compilation
@@ -388,28 +388,40 @@ DEVELOPMENT:
     }
 
 
+    // Build environment
+    if (options.includes('--build') || options.includes('--dev')) {
+        await envFile('.env')
+        // defaultOptions.server.paths.componentPages = `${out}/${defaultOptions.server.paths.pages}`.replaceAll('//', '/')
+        defaultOptions.server.paths.componentPages = out
+    }
+
+
     // Serveur de dév avec auto-compilation à la détection de changement de fichiers
     if (options.includes('--dev')) {
+        if (process.env.DEV_PORT) defaultOptions.server.port = process.env.DEV_PORT
+        if (process.env.PUBLIC_NAME) defaultOptions.server.paths.cache += `/${process.env.PUBLIC_NAME}`
+        if (!fsSync) fsSync = (await import('fs')).default
+        fsSync.mkdir(defaultOptions.server.paths.cache, { recursive: true }, (e) => e ? console.error(e) : null)
 
         http = (await import('http')).default
         https = (await import('https')).default
         Path = (await import('path')).default
         execFileSync = (await import('child_process')).execFileSync
 
-        // Lit le fichier d'environnement
-        if (process.env.ENV) {
-            await envFile(process.env.ENV)
-            delete process.env.ENV
-            if (process.env.DEV_PORT) defaultOptions.server.port = process.env.DEV_PORT
-            if (process.env.PUBLIC_NAME) defaultOptions.server.paths.cache += `/${process.env.PUBLIC_NAME}`
-            fsSync.mkdir(defaultOptions.server.paths.cache, { recursive: true }, (e) => e ? console.error(e) : null)
+        // // Lit le fichier d'environnement
+        // if (process.env.ENV) {
+        //     await envFile(process.env.ENV)
+        //     delete process.env.ENV
+        //     if (process.env.DEV_PORT) defaultOptions.server.port = process.env.DEV_PORT
+        //     if (process.env.PUBLIC_NAME) defaultOptions.server.paths.cache += `/${process.env.PUBLIC_NAME}`
+        //     fsSync.mkdir(defaultOptions.server.paths.cache, { recursive: true }, (e) => e ? console.error(e) : null)
 
-        }
+        // }
 
         // Créé un serveur web en attente de connexion
         http.createServer(server).listen(defaultOptions.server.port)
 
-        console.log(`Server running at http://${process.env.PUBLIC_DOMAIN}:${defaultOptions.server.port}/`);
+        console.log(`Server running at http://localhost:${defaultOptions.server.port}/`);
         return 
     }
 
