@@ -152,7 +152,7 @@ async function server(request, response) {
     const ssr = (route) => {
 
         // Vérifie que le chemin indiqué par la route existe puis l'importe
-        const componentPath = `${defaultOptions.server.paths.componentPages}/${route.page}.tpl.mjs`
+        const componentPath = `${defaultOptions.server.paths.componentPages}/${route.page}.tpl.mjs`.replaceAll('//', '/')
         if (!fsSync.existsSync(componentPath)) {
             console.error(`Component « ${route.page} » not found`, { url, route, componentPath })
             response.writeHead(418)
@@ -276,10 +276,12 @@ async function build(component, attributes, response) {
         const build = async () => {
             const [ , , component, attributesJSON ] = process.argv
             const attributes = JSON.parse(attributesJSON)
-
+console.log({ component, attributes })
             const Builder = (await import('./Compoted.mjs')).default
+console.log({ Builder })
             const RequestedComponent = (await import(component)).default
             const {parentPort, workerData} = (await import('worker_threads'))
+console.log({ RequestedComponent })
 
 
             const env = {}
@@ -298,6 +300,11 @@ async function build(component, attributes, response) {
     builder.once('message', content => {
         response.writeHead(200, { 'Content-Type': 'text/html' })
         response.end(content, 'utf-8')
+    })
+    builder.once('error', content => {
+        console.error(`Build error`, content)
+        response.writeHead(500, { 'Content-Type': 'text/html' })
+        response.end('', 'utf-8')
     })
 }
 

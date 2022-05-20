@@ -1,4 +1,4 @@
-export default class Compoted {
+export default class Compote {
 
     static options = {
         encode: {
