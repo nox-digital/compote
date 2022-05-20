@@ -8,16 +8,5 @@
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "",
-  "license": "ISC",
-  "imports": {
-    "#components/*": {
-      "default": "./components/*"
-    },
-    "#compiled/*": {
-      "default": "./compiled/*"
-    },
-    "#public/*": {
-      "default": "./public/*"
-    }
-  }
+  "license": "ISC"
 }

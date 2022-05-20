@@ -277,12 +277,9 @@ async function build(component, attributes, response) {
             const [ , , component, attributesJSON ] = process.argv
             const attributes = JSON.parse(attributesJSON)
 console.log({ component, attributes })
-            const Builder = (await import('./Compoted.mjs')).default
-console.log({ Builder })
+            const Builder = (await import('${defaultOptions.server.paths.componentPages}/Compote.mjs')).default
             const RequestedComponent = (await import(component)).default
             const {parentPort, workerData} = (await import('worker_threads'))
-console.log({ RequestedComponent })
-
 
             const env = {}
             Object.keys(process.env).filter(k => k.startsWith('PUBLIC_')).map(k => env[k] = process.env[k])
@@ -399,7 +396,7 @@ DEVELOPMENT:
     if (options.includes('--build') || options.includes('--dev')) {
         await envFile('.env')
         // defaultOptions.server.paths.componentPages = `${out}/${defaultOptions.server.paths.pages}`.replaceAll('//', '/')
-        defaultOptions.server.paths.componentPages = out
+        defaultOptions.server.paths.componentPages = out.at(-1) === '/' ? out.slice(0, -1) : out
     }
 
 
@@ -521,17 +518,25 @@ DEVELOPMENT:
     const mjs = await fs.readFile(src.replace('.html', '.mjs'), { encoding: 'utf-8' })
         .catch(e => null)
 
-    const idxBracket = mjs ? mjs.indexOf('{') : -1
-    if (mjs && !idxBracket) {
-        console.error(`${name}.mjs doesn't include the first export bracket « { »`)
+    const idxClass = mjs ? mjs.indexOf(`class ${name}`) : -1
+    const idxBracket = idxClass > -1 ? mjs.indexOf('{', idxClass) : -1
+    let imports = ''
+    let extend = ''
+    if (mjs) {
+        if (idxClass === -1 || idxBracket === -1) {
+            console.error(`${name}.mjs doesn't include "class ${name}" or his bracket "{`)
+        } else {
+            extend = mjs.slice(idxBracket + 1, mjs.lastIndexOf('}'))
+            const idxClassLine = mjs.lastIndexOf('\n', idxClass)
+            if (idxClassLine > -1) imports = mjs.slice(0, idxClassLine + 1)
+        }
     }
-    const extend = mjs && idxBracket > -1 ? mjs.slice(idxBracket + 1, mjs.lastIndexOf('}')) : ''
 
     // Génère le source de sortie
     const opt = { depth: Infinity, colors: false }
     const rawScript = compiled.script.replaceAll('`', '\\`').replaceAll('${', '\\${')
     // compiled: '${(new Date).toISOString()}|v0.8',
-    let output = `export default class ${name} {
+    let output = `${imports}export default class ${name} {
     static ___ = {
         compote: ${compoteVersion},
         component: ${name},
