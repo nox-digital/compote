@@ -200,7 +200,8 @@ async function server(request, response) {
 
 
     // Aucune route ne correspond, on renvoie le fichier demandé du dossier public
-    filePath = filePath ? filePath : `${defaultOptions.server.paths.public}${url}`
+    const staticPath = process.env.PUBLIC_STATIC || defaultOptions.server.paths.public
+    filePath = filePath ? filePath : `${staticPath}${url}`
     const extname = String(Path.extname(filePath)).toLowerCase();
     const mimeTypes = {
         '.html': 'text/html',
