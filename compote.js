@@ -134,7 +134,7 @@ const router = (url) => {
         }
         if (r.args?.length) {
             r.args.map((key, i) => args[key] = match[i + 1])
-            console.log({ args, r })
+            // console.log({ args, r })
         }
         return { ...u, ...r, args }
     }
@@ -276,7 +276,6 @@ async function build(component, attributes, response) {
         const build = async () => {
             const [ , , component, attributesJSON ] = process.argv
             const attributes = JSON.parse(attributesJSON)
-console.log({ component, attributes })
             const Builder = (await import('${defaultOptions.server.paths.componentPages}/Compote.mjs')).default
             const RequestedComponent = (await import(component)).default
             const {parentPort, workerData} = (await import('worker_threads'))
