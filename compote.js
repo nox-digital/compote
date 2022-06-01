@@ -310,6 +310,8 @@ async function build(component, attributes, response) {
 // async function start(filePath, out) {
 async function start(args=[], options=[]) {
 
+    const startTime = new Date()
+
     // Initialisation
     compiled.param = {}
     compiled.var = {}
@@ -393,8 +395,10 @@ DEVELOPMENT:
 
 
     // Build environment
-    if (options.includes('--build') || options.includes('--dev')) {
-        await envFile('.env')
+    if (options.includes('--build') 
+        || options.includes('--build-pages')
+        || options.includes('--dev')) {
+            await envFile('.env')
         // defaultOptions.server.paths.componentPages = `${out}/${defaultOptions.server.paths.pages}`.replaceAll('//', '/')
         defaultOptions.server.paths.componentPages = out.at(-1) === '/' ? out.slice(0, -1) : out
     }
@@ -438,12 +442,68 @@ DEVELOPMENT:
         let attributes = {}
         try { attributes = JSON.parse(json) }
         catch (e) { exit(`Error when parsing JSON parameters: ${e}`) }
-        await build(src, attributes)
+        const html = await build(src, attributes)
+        console.log(html)
+        return
+    }
+
+    // Construction de toutes les pages
+    if (options.includes('--build-pages')) {
+
+        // Compile d'abord l'ensemble des components
+        // TODO
+
+        // Recherche les composants terminant par « Page.tpl.mjs »
+        const pages = (await fs.readdir(src))
+            .filter(f => f.indexOf('Page.tpl.mjs') > 0)
+
+        const env = {}
+        Object.keys(process.env).filter(k => k.startsWith('PUBLIC_')).map(k => env[k] = process.env[k])
+        const Builder = (await import(`${src}/Compote.mjs`)).default
+        const state = { env, locale: env.PUBLIC_LANG || 'fr' }
+        const mkdirCreated = []
+        let output = ''
+        let nbCharacters = 0
+        let nbPages = 0
+        for (const page of pages) {
+            state.components = {}
+            const Component = (await import(`${src}/${page}`)).default
+            state.components[Component.name] = Component
+            const routes = await Component.routes()
+            await Builder.loadDependencies(Component, state.components, true)
+            const prefix = `${out}/${state.env.PUBLIC_DOMAIN.replace('.', '-')}/public/`
+            await fs.mkdir(prefix, { recursive: true })
+            console.log(`${page} ${routes.length}x... => ${prefix}`)
+
+            for (const route of routes) {
+
+                let filepath = prefix + route.path.slice(route.path.at(0) === '/' ? 1 : 0)
+                if (filepath.at(-1) !== '/' && filepath.slice(filepath.lastIndexOf('/')).indexOf('.') === -1) {
+                    filepath += '/'
+                }
+                const isFolder = filepath.at(-1) === '/'
+                if (isFolder && !mkdirCreated.includes(filepath)) {
+                    await fs.mkdir(filepath, { recursive: true })
+                    mkdirCreated.push(filepath)
+                }
+                const newState = { ...state }
+                const component = new Component(newState, route.params) //{ state: newState, attributes: route.params, props: route.props })
+                output = await Builder.build(newState, component)
+                nbCharacters += output.length
+                nbPages++
+                if (options.includes('--progress')) console.log(`${Math.round(output.length / 1024)}KB ${filepath}`)
+                await fs.writeFile(filepath + (isFolder ? 'index.html' : ''), output)
+
+            }
+        }
+
+        const deltaTime = new Date() - startTime
+        console.log(`\nwrited ${nbPages} files (${Math.round(nbCharacters/1024)}k characters) in ${deltaTime / 1000}s`)
         return
     }
 
 
-
+    
     // Compilation d'une source explicite
     const srcFolder = (src.at(-1) === '/' || src.indexOf('.') === -1)
     if (srcFolder) {
