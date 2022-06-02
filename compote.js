@@ -149,60 +149,67 @@ async function server(request, response) {
     const url = request.url.at(-1) === '/' ? `${request.url}index.html` : request.url
     let filePath
 
-    const ssr = (route) => {
-
-        // Vérifie que le chemin indiqué par la route existe puis l'importe
-        const componentPath = `${defaultOptions.server.paths.componentPages}/${route.page}.tpl.mjs`.replaceAll('//', '/')
-        if (!fsSync.existsSync(componentPath)) {
-            console.error(`Component « ${route.page} » not found`, { url, route, componentPath })
-            response.writeHead(418)
-            return response.end(``)
-        }
-
-        try { 
-            // console.log({ componentPath, args: route.args })
-            build(componentPath, route.args, response)
-        }
-        catch (e) {            
-            console.error('\x1b[35m%s\x1b[0m', `BUILD ERROR:\n${e.toString()}`)
-            response.writeHead(500)
-            return response.end(``)
-        }
-    }
-
-
     // Route demandée
-    const route = router(url)
-    if (route.rewrited) {
-        filePath = `${defaultOptions.server.paths.cache}/${route.path}`
-
-        // S'il n'existe pas encore en cache
-        if (!route.cache || !fsSync.existsSync(filePath)) {
-
-            console.log('DOWNLOAD', filePath)
-            // Créé les répertoires intérmédiaires
-            await fs.mkdir(`${defaultOptions.server.paths.cache}/${route.paths.join('/')}`, { recursive: true })
-
-            // Télécharge le fichier
-           const file = fsSync.createWriteStream(filePath)
-           const dl = https.get(route.rewrited, res => res.pipe(file))
-           await Promise.resolve(dl)
-                .catch(err => {
-                    console.log({ DOWNLOAD_ERROR: err })
-                    fsSync.unlink(filePath)
-                })
-           await new Promise(resolve => setTimeout(resolve, 200))
+    let ssr
+    if (options.includes('--dev')) {
+        
+        ssr = (route) => {
+            // Vérifie que le chemin indiqué par la route existe puis l'importe
+            const componentPath = `${defaultOptions.server.paths.componentPages}/${route.page}.tpl.mjs`.replaceAll('//', '/')
+            if (!fsSync.existsSync(componentPath)) {
+                console.error(`Component « ${route.page} » not found`, { url, route, componentPath })
+                response.writeHead(418)
+                return response.end(``)
+            }
+    
+            try { 
+                // console.log({ componentPath, args: route.args })
+                build(componentPath, route.args, response)
+            }
+            catch (e) {            
+                console.error('\x1b[35m%s\x1b[0m', `BUILD ERROR:\n${e.toString()}`)
+                response.writeHead(500)
+                return response.end(``)
+            }
         }
-    }
-    else if (route.page) {
-        return ssr(route)
+    
+    
+        const route = router(url)
+        if (route.rewrited) {
+            filePath = `${defaultOptions.server.paths.cache}/${route.path}`
+
+            // S'il n'existe pas encore en cache
+            if (!route.cache || !fsSync.existsSync(filePath)) {
+
+                console.log('DOWNLOAD', filePath)
+                // Créé les répertoires intérmédiaires
+                await fs.mkdir(`${defaultOptions.server.paths.cache}/${route.paths.join('/')}`, { recursive: true })
+
+                // Télécharge le fichier
+            const file = fsSync.createWriteStream(filePath)
+            const dl = https.get(route.rewrited, res => res.pipe(file))
+            await Promise.resolve(dl)
+                    .catch(err => {
+                        console.log({ DOWNLOAD_ERROR: err })
+                        fsSync.unlink(filePath)
+                    })
+            await new Promise(resolve => setTimeout(resolve, 200))
+            }
+        }
+        else if (route.page) {
+            return ssr(route)
+        }
+
     }
 
 
     // Aucune route ne correspond, on renvoie le fichier demandé du dossier public
-    const staticPath = process.env.PUBLIC_STATIC || defaultOptions.server.paths.public
+    const staticPath = options.includes('--dev') 
+        ? (process.env.PUBLIC_STATIC || defaultOptions.server.paths.public)
+        : `${argsWithoutOptions[1]}/${process.env.PUBLIC_DOMAIN.replace('.', '-')}/public`
     filePath = filePath ? filePath : `${staticPath}${url}`
-    const extname = String(Path.extname(filePath)).toLowerCase();
+    const extname = String(Path.extname(filePath)).toLowerCase()
+    if (!extname) filePath += '/index.html'
     const mimeTypes = {
         '.html': 'text/html',
         '.js': 'text/javascript',
@@ -219,16 +226,16 @@ async function server(request, response) {
         '.eot': 'application/vnd.ms-fontobject',
         '.otf': 'application/font-otf',
         '.wasm': 'application/wasm'
-    };
+    }
 
-    const contentType = mimeTypes[extname] || 'application/octet-stream'
+    const contentType = mimeTypes[extname || '.html'] || 'application/octet-stream'
     fsSync.readFile(filePath, function(error, content) {
         if (error) {
             if (error.code == 'ENOENT') {
                 response.writeHead(404);
                 const custom404 = defaultOptions.server.routes.find(r => r.match === 404)
                 if (!custom404) return response.end(`Page Not Found\n`);
-                return ssr(custom404)
+                if (ssr) return ssr(custom404)
             }
             else {
                 response.writeHead(500);
@@ -404,36 +411,6 @@ DEVELOPMENT:
     }
 
 
-    // Serveur de dév avec auto-compilation à la détection de changement de fichiers
-    if (options.includes('--dev')) {
-        if (process.env.DEV_PORT) defaultOptions.server.port = process.env.DEV_PORT
-        if (process.env.PUBLIC_NAME) defaultOptions.server.paths.cache += `/${process.env.PUBLIC_NAME}`
-        if (!fsSync) fsSync = (await import('fs')).default
-        fsSync.mkdir(defaultOptions.server.paths.cache, { recursive: true }, (e) => e ? console.error(e) : null)
-
-        http = (await import('http')).default
-        https = (await import('https')).default
-        Path = (await import('path')).default
-        execFileSync = (await import('child_process')).execFileSync
-
-        // // Lit le fichier d'environnement
-        // if (process.env.ENV) {
-        //     await envFile(process.env.ENV)
-        //     delete process.env.ENV
-        //     if (process.env.DEV_PORT) defaultOptions.server.port = process.env.DEV_PORT
-        //     if (process.env.PUBLIC_NAME) defaultOptions.server.paths.cache += `/${process.env.PUBLIC_NAME}`
-        //     fsSync.mkdir(defaultOptions.server.paths.cache, { recursive: true }, (e) => e ? console.error(e) : null)
-
-        // }
-
-        // Créé un serveur web en attente de connexion
-        http.createServer(server).listen(defaultOptions.server.port)
-
-        console.log(`Server running at http://localhost:${defaultOptions.server.port}/`);
-        return 
-    }
-
-
     // Construction d'un composant compilé à un fichier .html
     if (options.includes('--build')) {
         if (!src) exit(`Missing compiled component source to build`)
@@ -448,7 +425,7 @@ DEVELOPMENT:
     }
 
     // Construction de toutes les pages
-    if (options.includes('--build-pages')) {
+    if (options.includes('--build-pages') && !options.includes('--bypass-build')) {
 
         // Compile d'abord l'ensemble des components
         // TODO
@@ -497,8 +474,33 @@ DEVELOPMENT:
             }
         }
 
+        // Copie des fichiers du répertoire statique
+
+
         const deltaTime = new Date() - startTime
         console.log(`\nwrited ${nbPages} files (${Math.round(nbCharacters/1024)}k characters) in ${deltaTime / 1000}s`)
+    
+
+    }
+
+    // Serveur web
+    if (options.includes('--dev')
+    || options.includes('--build-pages')) {
+
+        if (process.env.DEV_PORT) defaultOptions.server.port = process.env.DEV_PORT
+        if (process.env.PUBLIC_NAME) defaultOptions.server.paths.cache += `/${process.env.PUBLIC_NAME}`
+        if (!fsSync) fsSync = (await import('fs')).default
+        fsSync.mkdir(defaultOptions.server.paths.cache, { recursive: true }, (e) => e ? console.error(e) : null)
+
+        http = (await import('http')).default
+        https = (await import('https')).default
+        Path = (await import('path')).default
+        // execFileSync = (await import('child_process')).execFileSync
+
+        // Créé un serveur web en attente de connexion
+        http.createServer(server).listen(defaultOptions.server.port)
+
+        console.log(`Server running at http://localhost:${defaultOptions.server.port}/`);
         return
     }
 
@@ -1619,6 +1621,7 @@ function mergeObjects(set, defaults) {
 
 
 const args = process.argv.slice(2)
+const argsWithoutOptions = args.filter(a => !a.startsWith('--'))
 const options = args.filter(a => a.startsWith('--'))
 start(args, options)
 // const [ , , filePath, out ] = process.argv
