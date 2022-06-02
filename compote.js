@@ -206,7 +206,7 @@ async function server(request, response) {
     // Aucune route ne correspond, on renvoie le fichier demandé du dossier public
     const staticPath = options.includes('--dev') 
         ? (process.env.PUBLIC_STATIC || defaultOptions.server.paths.public)
-        : `${argsWithoutOptions[1]}/${process.env.PUBLIC_DOMAIN.replace('.', '-')}/public`
+        : `${argsWithoutOptions[1]}/${process.env.PUBLIC_DOMAIN}/public`
     filePath = filePath ? filePath : `${staticPath}${url}`
     const extname = String(Path.extname(filePath)).toLowerCase()
     if (!extname) filePath += '/index.html'
@@ -430,6 +430,8 @@ DEVELOPMENT:
         // Compile d'abord l'ensemble des components
         // TODO
 
+
+
         // Recherche les composants terminant par « Page.tpl.mjs »
         const pages = (await fs.readdir(src))
             .filter(f => f.indexOf('Page.tpl.mjs') > 0)
@@ -448,7 +450,7 @@ DEVELOPMENT:
             state.components[Component.name] = Component
             const routes = await Component.routes()
             await Builder.loadDependencies(Component, state.components, true)
-            const prefix = `${out}/${state.env.PUBLIC_DOMAIN.replace('.', '-')}/public/`
+            const prefix = `${out}/${env.PUBLIC_DOMAIN}/public/`
             await fs.mkdir(prefix, { recursive: true })
             console.log(`${page} ${routes.length}x... => ${prefix}`)
 
@@ -473,9 +475,6 @@ DEVELOPMENT:
 
             }
         }
-
-        // Copie des fichiers du répertoire statique
-
 
         const deltaTime = new Date() - startTime
         console.log(`\nwrited ${nbPages} files (${Math.round(nbCharacters/1024)}k characters) in ${deltaTime / 1000}s`)
