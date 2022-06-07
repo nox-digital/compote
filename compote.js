@@ -5,7 +5,7 @@ const customInspectSymbol = Symbol.for('nodejs.util.inspect.custom')
 let http, https, Path, fsSync, execFileSync
 
 
-const compoteVersion = 220517
+const compoteVersion = 220606
 const defaultOptions = {
     syntax: {
 
@@ -482,6 +482,22 @@ DEVELOPMENT:
 
     }
 
+
+    // Compilation d'une source explicite
+    const srcFolder = (src.at(-1) === '/' || src.indexOf('.') === -1)
+    if (srcFolder) {
+
+        const templates = await findComponentFiles(src.at(-1) === '/' ? src.slice(0, -1) : src)
+        for (const name in templates) {
+            if ('html' in templates[name]) {
+                const html = `${templates[name].html}`
+                const outfile = `${out}/${name}.tpl.mjs`.replaceAll('//', '/')
+                await start([ html, outfile ])
+            }
+        }
+    }
+    
+
     // Serveur web
     if (options.includes('--dev')
     || options.includes('--build-pages')) {
@@ -498,30 +514,14 @@ DEVELOPMENT:
 
         // Créé un serveur web en attente de connexion
         http.createServer(server).listen(defaultOptions.server.port)
-
-        console.log(`Server running at http://localhost:${defaultOptions.server.port}/`);
+        console.log(`\nServer running at http://localhost:${defaultOptions.server.port}/\n`);
         return
     }
 
 
-    
-    // Compilation d'une source explicite
-    const srcFolder = (src.at(-1) === '/' || src.indexOf('.') === -1)
-    if (srcFolder) {
-
-        const templates = await findComponentFiles(src.at(-1) === '/' ? src.slice(0, -1) : src)
-        for (const name in templates) {
-            if ('html' in templates[name]) {
-                const html = `${templates[name].html}`
-                const outfile = `${out}/${name}.tpl.mjs`.replaceAll('//', '/')
-                await start([ html, outfile ])
-            }
-        }
-        return
-    }
     
     // Fichier source => out
-    console.log(`Compilation of ${src} -> ${out}`)
+    console.log(`Compilation of ${src}`)
 
     // Prépare les variables
     for (const d in dependencies) delete dependencies[d]
