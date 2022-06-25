@@ -296,7 +296,7 @@ async function build(component, attributes, response) {
             state.components[RequestedComponent.name] = RequestedComponent
             await Compote.loadDependencies(RequestedComponent, state.components, true)
             const requestedComponent = new RequestedComponent(Compote, state, attributes)        
-            output = await Compote.build(state, requestedComponent)
+            output = await Compote.build(state, requestedComponent, undefined, true)
             parentPort.postMessage(output)
         }
         build()
@@ -466,9 +466,6 @@ DEVELOPMENT:
 
                 delete state.page
 
-                // const newState = { env: state.env, locale: state.locale, components: {} }
-                const newState = state
-
                 let filepath = prefix + route.path.slice(route.path.at(0) === '/' ? 1 : 0)
                 if (filepath.at(-1) !== '/' && filepath.slice(filepath.lastIndexOf('/')).indexOf('.') === -1) {
                     filepath += '/'
@@ -478,8 +475,8 @@ DEVELOPMENT:
                     await fs.mkdir(filepath, { recursive: true })
                     mkdirCreated.push(filepath)
                 }
-                const component = new Component(Compote, newState, route.params) //{ state: newState, attributes: route.params, props: route.props })
-                output = await Compote.build(newState, component)
+                const component = new Component(Compote, state, route.params) //{ state: state, attributes: route.params, props: route.props })
+                output = await Compote.build(state, component)
                 nbCharacters += output.length
                 nbPages++
                 if (options.includes('--progress')) console.log(`${Math.round(output.length / 1024)}KB ${filepath}`)

@@ -162,9 +162,10 @@ ___________________________________________________
 BUILD CODE ERROR - ${instance.constructor.name}
 \x1b[35m${code.toString()}
 \x1b[31m${e.toString()}
-___________________________________________________
+    \x1b[31m${instance.cp.name}
+        ___________________________________________________
 \x1b[0m`)
-
+                return ''
             }
         },
 
@@ -366,8 +367,6 @@ ___________________________________________________
             Object.keys(o).map(k => instance[k] = o[k])
         }
 
-        for (const f in Compote.fn) state[f] = Compote.fn[f]
-
         instance['…extra'] = Object.keys(attributes).filter(a => a !== '/' && !(a in component.___.param)).map(a => `${a}=${attributes[a]}`).join(' ')
         instance[`…${component.name}`] = slot
     }
@@ -400,12 +399,14 @@ ___________________________________________________
 
     static fn = {
         CDATA: (data) => typeof data === 'string' && data.trim() ? `/*<![CDATA[*/\n${data}\n/*]]>*/` : '',
+        /*
         styleVars: (state, Component) => Compote.buildStyleVars(state.page[Component.name].styleVars),
         scriptVars: (state, Component) => {
             const scriptLabels = {}
             Component.___.scriptLabels?.forEach(l => scriptLabels[l] = Component.___.label[state.locale][l])    
             return Compote.buildScriptVars(state.page[Component.name].scriptVars, scriptLabels)
         },
+        */
     }
 
 
@@ -416,19 +417,20 @@ ___________________________________________________
      * @param {any} pairList Liste de paire [ {obj}, [arr] ], [ { obj}, [arr] ], ...
      * @returns {any}
      */
-     static async build(state, instance, caller) {
+     static async build(state, instance, caller, newPage=false) {
         const ___ = instance.constructor.___
         const name = instance.constructor.name
         const firstInstance = ___.prepared === 0 ? true : false
         ___.prepared++
 
+        // Prépare le state
         if (!('page' in state)) state.page = {}
         if (!(name in state.page)) state.page[name] = {}
         if (!('styleVars' in state.page[name])) state.page[name].styleVars = {}
         if (!('scriptVars' in state.page[name])) state.page[name].scriptVars = {}        
+        for (const f in Compote.fn) state[f] = Compote.fn[f]
 
 
-        if (!['Price', 'Photo'].includes(name)) console.log(`${name} ${state.page.scriptVars?.Card?.length || 0}`)
 
         // Vérifie les attributs
         this.checkFormat(___.param, instance, caller)
@@ -458,25 +460,36 @@ ___________________________________________________
 
 
         // Convertit chaque « paire »
-        const r = (await Promise.all(
+        let html = (await Promise.all(
             ___.template.map(pair => this.nextPair(state, instance, pair))
             .flat(Infinity)
             .map(async x => x instanceof Promise ? await Promise.resolve(x) : x)
         )).join('')
+        
 
-/*
-        // Convertit les variables de styles
-        state.page.styleVars[name] = this.buildStyleVars(state.page[name].styleVars) 
+        // Remplace les scripts/styles après avoir construit entièrement la page
+        if (newPage) {
+            console.log(`New page ${name} - rewrite`)
+            const styles = []
+            const scripts = []
+            for (const name in state.components) {
 
-        // Convertit les variables de script
-        const scriptLabels = {}
-        ___.scriptLabels?.forEach(l => scriptLabels[l] = ___.label[state.locale][l])
-        state.page.scriptVars[name] = this.buildScriptVars(state.page[name].scriptVars, scriptLabels) 
-  */      
+                if (!(name in state.page)) continue
+                const Component = state.components[name]
 
+                const style = Compote.buildStyleVars(state.page[name].styleVars)
+                if (style) styles.push(`<style data-src=${name}>\n${style}\n</style>`)
+                
+                const scriptLabels = {}
+                Component.___.scriptLabels.forEach(l => scriptLabels[l] = Component.___.label[state.locale][l])
+                const script = Compote.buildScriptVars(state.page[name].scriptVars, scriptLabels)
+                if (script) scripts.push(`<script data-src=${name}>/*<![CDATA[*/\n${script}\n/*]]>*/</script>`)
+            }
+            html = html.replace('<style id="compote-style"></style>', styles.join(''))
+            html = html.replace('<script id="compote-script"></script>', scripts.join(''))
+        }
 
-        if (name === 'Page') console.log(`<<< ${name} ${state.page.scriptVars?.Card?.length || 0}`)
-        return r
+        return html
     }
 
     static async loadDependencies(Component, loaded, nested=false) {
