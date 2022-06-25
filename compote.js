@@ -5,7 +5,7 @@ const customInspectSymbol = Symbol.for('nodejs.util.inspect.custom')
 let http, https, Path, fsSync, execFileSync
 
 
-const compoteVersion = 220606
+const compoteVersion = 220624
 const defaultOptions = {
     syntax: {
 
@@ -33,6 +33,7 @@ const defaultOptions = {
             cache: './cache',
             public: './public',
             pages: 'pages',
+            compiled: './compiled',
         },
         routes: [
             { match: /^index\.html$/, page: 'HomePage' },
@@ -155,7 +156,7 @@ async function server(request, response) {
         
         ssr = (route) => {
             // Vérifie que le chemin indiqué par la route existe puis l'importe
-            const componentPath = `${defaultOptions.server.paths.componentPages}/${route.page}.tpl.mjs`.replaceAll('//', '/')
+            const componentPath = `${defaultOptions.server.paths.compiled}/${route.page}.tpl.mjs`.replaceAll('//', '/')
             if (!fsSync.existsSync(componentPath)) {
                 console.error(`Component « ${route.page} » not found`, { url, route, componentPath })
                 response.writeHead(418)
@@ -163,7 +164,6 @@ async function server(request, response) {
             }
     
             try { 
-                // console.log({ componentPath, args: route.args })
                 build(componentPath, route.args, response)
             }
             catch (e) {            
@@ -272,6 +272,7 @@ const envFile = async (filename) => {
 
 
 async function build(component, attributes, response) {
+
     const { Worker, MessageChannel, MessagePort, isMainThread, parentPort } = (await import('worker_threads'))
 
     if (process.env.ENV) {
@@ -284,7 +285,7 @@ async function build(component, attributes, response) {
         const build = async () => {
             const [ , , component, attributesJSON ] = process.argv
             const attributes = JSON.parse(attributesJSON)
-            const Builder = (await import('${defaultOptions.server.paths.componentPages}/Compote.mjs')).default
+            const Compote = (await import('${defaultOptions.server.paths.compiled}/Compote.mjs')).default
             const RequestedComponent = (await import(component)).default
             const {parentPort, workerData} = (await import('worker_threads'))
 
@@ -293,19 +294,19 @@ async function build(component, attributes, response) {
             const state = { env, locale: env.PUBLIC_LANG || 'fr', components: {} }
 
             state.components[RequestedComponent.name] = RequestedComponent
-            await Builder.loadDependencies(RequestedComponent, state.components, true)
-            const requestedComponent = new RequestedComponent(state, attributes)        
-            output = await Builder.build(state, requestedComponent)
+            await Compote.loadDependencies(RequestedComponent, state.components, true)
+            const requestedComponent = new RequestedComponent(Compote, state, attributes)        
+            output = await Compote.build(state, requestedComponent)
             parentPort.postMessage(output)
         }
         build()
     `
-    const builder = new Worker(workerCode, { eval: true, argv: [ component, JSON.stringify(attributes) ] })
-    builder.once('message', content => {
+    const compote = new Worker(workerCode, { eval: true, argv: [ component, JSON.stringify(attributes) ] })
+    compote.once('message', content => {
         response.writeHead(200, { 'Content-Type': 'text/html' })
         response.end(content, 'utf-8')
     })
-    builder.once('error', content => {
+    compote.once('error', content => {
         console.error(`Build error`, content)
         response.writeHead(500, { 'Content-Type': 'text/html' })
         response.end('', 'utf-8')
@@ -356,7 +357,7 @@ BUILD:
 ------
 
     By file with optional JSON parameters:
-    node compote --build ./compiled/Component.tpl.mjs ./build/index.html {}
+    node compote --build ./compiled/Component.tpl.mjs ./build/index.html {json}
 
     Build all pages, based on .env file or folder:
     node compote --build-pages ./compiled/ ./build/
@@ -406,8 +407,6 @@ DEVELOPMENT:
         || options.includes('--build-pages')
         || options.includes('--dev')) {
             await envFile('.env')
-        // defaultOptions.server.paths.componentPages = `${out}/${defaultOptions.server.paths.pages}`.replaceAll('//', '/')
-        defaultOptions.server.paths.componentPages = out.at(-1) === '/' ? out.slice(0, -1) : out
     }
 
 
@@ -417,10 +416,19 @@ DEVELOPMENT:
         if (!out || ['"', "'", '{'].includes(out.at(0))) exit(`Missing HTML file destination to build`)
         console.log(`construction du composant ${src} => ${out}`)
         let attributes = {}
-        try { attributes = JSON.parse(json) }
-        catch (e) { exit(`Error when parsing JSON parameters: ${e}`) }
-        const html = await build(src, attributes)
-        console.log(html)
+        try { 
+            if (json) attributes = JSON.parse(json) 
+        }
+        catch (e) { 
+            exit(`Error when parsing JSON parameters: ${e} « ${json} »`) 
+        }
+        const html = await build(src, attributes, {
+            writeHead: (code, message) => console.dir({code, message}),
+            response: (response) => console.log({response}),
+            end: (content, encoding) => fs.writeFile(out, content, { encoding })
+                                            .catch(e => console.log)
+        })
+        // console.log(html)
         return
     }
 
@@ -438,23 +446,28 @@ DEVELOPMENT:
 
         const env = {}
         Object.keys(process.env).filter(k => k.startsWith('PUBLIC_')).map(k => env[k] = process.env[k])
-        const Builder = (await import(`${src}/Compote.mjs`)).default
-        const state = { env, locale: env.PUBLIC_LANG || 'fr' }
+        const Compote = (await import(`${src}/Compote.mjs`)).default
+        const state = { env, locale: env.PUBLIC_LANG || 'fr', components: {}, allComponents: {} }
         const mkdirCreated = []
         let output = ''
         let nbCharacters = 0
         let nbPages = 0
         for (const page of pages) {
-            state.components = {}
+            
             const Component = (await import(`${src}/${page}`)).default
-            state.components[Component.name] = Component
+            state.allComponents[Component.name] = Component
             const routes = await Component.routes()
-            await Builder.loadDependencies(Component, state.components, true)
+            state.components = await Compote.loadDependencies(Component, state.allComponents, true)
             const prefix = `${out}/${env.PUBLIC_DOMAIN}/public/`
             await fs.mkdir(prefix, { recursive: true })
             console.log(`${page} ${routes.length}x... => ${prefix}`)
 
-            for (const route of routes) {
+            for (const route of routes) {    
+
+                delete state.page
+
+                // const newState = { env: state.env, locale: state.locale, components: {} }
+                const newState = state
 
                 let filepath = prefix + route.path.slice(route.path.at(0) === '/' ? 1 : 0)
                 if (filepath.at(-1) !== '/' && filepath.slice(filepath.lastIndexOf('/')).indexOf('.') === -1) {
@@ -465,9 +478,8 @@ DEVELOPMENT:
                     await fs.mkdir(filepath, { recursive: true })
                     mkdirCreated.push(filepath)
                 }
-                const newState = { ...state }
-                const component = new Component(newState, route.params) //{ state: newState, attributes: route.params, props: route.props })
-                output = await Builder.build(newState, component)
+                const component = new Component(Compote, newState, route.params) //{ state: newState, attributes: route.params, props: route.props })
+                output = await Compote.build(newState, component)
                 nbCharacters += output.length
                 nbPages++
                 if (options.includes('--progress')) console.log(`${Math.round(output.length / 1024)}KB ${filepath}`)
@@ -596,37 +608,25 @@ DEVELOPMENT:
     // Génère le source de sortie
     const opt = { depth: Infinity, colors: false }
     const rawScript = compiled.script.replaceAll('`', '\\`').replaceAll('${', '\\${')
-    // compiled: '${(new Date).toISOString()}|v0.8',
     let output = `${imports}export default class ${name} {
     static ___ = {
         compote: ${compoteVersion},
         component: ${name},
         dependencies: ${inspect(dependencies, opt)},
+        prepared: 0,
+        setup:  ${inspect(compiled.setup, opt)},
         param: ${inspect(compiled.param, opt)},
         var: ${inspect(compiled.var, opt)},
         data: ${inspect(compiled.data, opt)},
         label: ${inspect(compiled.label, opt)},
         scriptLabels: ${inspect(compiled.scriptLabels, opt)},
-        scripts:  [${rawScript ? ['\`', rawScript, '\`'].join('') : '' }],
-        styles:  [${compiled.style ? ['\`', compiled.style.replaceAll('`', '\\'), '\`'].join('') : ''}],
-        setup:  ${inspect(compiled.setup, opt)},
-        prepared: 0,
+        script:  ${rawScript ? ['\`', rawScript, '\`'].join('') : "''" },
+        style:  ${compiled.style ? ['\`', compiled.style.replaceAll('`', '\\'), '\`'].join('') : "''"},
         template:  ${inspect(compiled.template, opt)},
     }
 
-    constructor(state, attributes, slot) {
-
-        for (const label in (${name}.___.label[state.locale] ?? {})) {
-            const t = ${name}.___.label[state.locale][label]
-            this[label] = typeof t === 'string' ? t : (_) => ${name}.___.i18n(_, t)
-        }
-
-        for (const o of [ ${name}.___.data, attributes ]) {
-            Object.keys(o).map(k => this[k] = o[k])
-        }
-
-        this['…extra'] = Object.keys(attributes).filter(a => a !== '/' && !(a in ${name}.___.param)).map(a => \`\${a}=\${attributes[a]}\`).join(' ')
-        this['…${name}'] = slot
+    constructor(Compote, state, attributes, slot) {
+        Compote.componentConstructor(this, ${name}, state, attributes, slot)
     }\n${extend}}`
     Object.keys(compiled).forEach((k,i) => compiled[i] = null)
 

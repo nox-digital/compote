@@ -144,7 +144,7 @@ export default class Compote {
             if (isComponent) {
                 if (componentFound) {
                     const Component = state.components[name]
-                    const component = new Component(state, attributes, slotBuilt) 
+                    const component = new Component(instance.Compote, state, attributes, slotBuilt) 
                     return this.build(state, component, instance)
                 }
             }
@@ -222,22 +222,6 @@ ___________________________________________________
             return map
         },
 
-    }
-
-    static buildStyleVars(vars) {
-        const block = []
-        for (const variable in vars) {
-            block.push(`--${variable}: ${vars[variable]};`)
-        }
-        return block.length ? `\n:root {\n${block.join("\n")}\n}\n` : ''
-    }
-
-    static buildScriptVars(vars) {
-        const list = []
-        for (const variable in vars) {
-            list.push(`const ${variable} = ${JSON.stringify(vars[variable])}`)
-        }
-        return list.length ? `\n${list.join("\n")}\n` : ''
     }
 
 
@@ -362,6 +346,70 @@ ___________________________________________________
     }
 
     /**
+     * Constructeur des composants
+     * Prépare les données/libellés pour être utilisés directement depuis l'instance
+     * 
+     * @param {*} instance 
+     * @param {*} component 
+     * @param {*} state 
+     * @param {*} attributes 
+     * @param {*} slot 
+     */
+    static componentConstructor(instance, component, state, attributes, slot) {
+        instance.Compote = Compote
+        for (const label in (component.___.label[state.locale] ?? {})) {
+            const t = component.___.label[state.locale][label]
+            instance[label] = typeof t === 'string' ? t : (_) => component.___.i18n(_, t)
+        }
+
+        for (const o of [ component.___.data, attributes ]) {
+            Object.keys(o).map(k => instance[k] = o[k])
+        }
+
+        for (const f in Compote.fn) state[f] = Compote.fn[f]
+
+        instance['…extra'] = Object.keys(attributes).filter(a => a !== '/' && !(a in component.___.param)).map(a => `${a}=${attributes[a]}`).join(' ')
+        instance[`…${component.name}`] = slot
+    }
+
+
+    static buildStyleVars(vars) {
+        const block = []
+        for (const variable in vars) {
+            block.push(`--${variable}: ${vars[variable]};`)
+        }
+        return block.length ? `\n:root {\n${block.join("\n")}\n}\n` : ''
+    }
+
+    static buildScriptVars(vars, labels={}) {
+        const list = []
+        for (const variable in vars) {
+            list.push(`const ${variable} = ${JSON.stringify(vars[variable])};\n`)
+        }
+        for (const label in labels) {
+            const code = typeof labels[label] === 'string' 
+                ? `\`${labels[label]}\`` 
+                : `(_) => i18n(_, JSON.parse(${JSON.stringify(labels[label])}))`
+            list.push(`const ${label} = ${code};\n`)
+        }
+
+        return list.length ? `\n${list.join("\n")}\n` : ''
+    }
+
+
+
+    static fn = {
+        CDATA: (data) => typeof data === 'string' && data.trim() ? `/*<![CDATA[*/\n${data}\n/*]]>*/` : '',
+        styleVars: (state, Component) => Compote.buildStyleVars(state.page[Component.name].styleVars),
+        scriptVars: (state, Component) => {
+            const scriptLabels = {}
+            Component.___.scriptLabels?.forEach(l => scriptLabels[l] = Component.___.label[state.locale][l])    
+            return Compote.buildScriptVars(state.page[Component.name].scriptVars, scriptLabels)
+        },
+    }
+
+
+    /**
      * Construit le composant
      * 
      * @param {any} instance
@@ -374,11 +422,21 @@ ___________________________________________________
         const firstInstance = ___.prepared === 0 ? true : false
         ___.prepared++
 
+        if (!('page' in state)) state.page = {}
+        if (!(name in state.page)) state.page[name] = {}
+        if (!('styleVars' in state.page[name])) state.page[name].styleVars = {}
+        if (!('scriptVars' in state.page[name])) state.page[name].scriptVars = {}        
+
+
+        if (!['Price', 'Photo'].includes(name)) console.log(`${name} ${state.page.scriptVars?.Card?.length || 0}`)
+
         // Vérifie les attributs
         this.checkFormat(___.param, instance, caller)
 
         // Configure le composant une seule fois si aucune autre instance ne l'a encore fait
         if (firstInstance) {
+
+            ___.i18n = this.i18n
 
             // Initialise la liste des composants enfants
             ___.components = {}
@@ -386,20 +444,9 @@ ___________________________________________________
                 ___.components[dep] = state.components[dep]
             }
 
-            // Initialise les traductions par fonction
-            ___.i18n = this.i18n
-            if (!('scriptLabels' in state)) {
-                state.scriptLabels = {}
-            }
-            for (const l in ___.label[state.locale]) {
-                if (___.scriptLabels?.includes(l)) {
-                    state.scriptLabels[l] = ___.label[state.locale][l]
-                }
-            }
-            
             // Prépare une fois le composant pour toutes les instances
             if ('prepare' in instance.constructor) {
-                await instance.constructor.prepare(state)
+                await instance.constructor.prepare(state.env)
             }
         }
 
@@ -409,38 +456,42 @@ ___________________________________________________
         // Vérifie les variables générées
         this.checkFormat(___.var, instance, caller)
 
-        // Convertit les variables de styles
-        if (firstInstance) {
-            if ('styleVars' in ___.setup && ___.setup.styleVars instanceof Object) {
-                ___.setup.styleVars = this.buildStyleVars(___.setup.styleVars) 
-                ___.styles.unshift(___.setup.styleVars)
-            }
-
-            // Convertit les variables de script
-            if ('scriptVars' in ___.setup && ___.setup.scriptVars instanceof Object) {
-                ___.setup.scriptVars = this.buildScriptVars(___.setup.scriptVars) 
-                ___.scripts.unshift(___.setup.scriptVars)
-            }
-            const cdata = '/*<![CDATA[*/'
-            if (___.scripts.length && ___.scripts[0] !== cdata) {
-                ___.scripts.unshift(cdata)
-                ___.scripts.push('/*]]>*/')
-            }
-        }
 
         // Convertit chaque « paire »
-        return (await Promise.all(
+        const r = (await Promise.all(
             ___.template.map(pair => this.nextPair(state, instance, pair))
             .flat(Infinity)
             .map(async x => x instanceof Promise ? await Promise.resolve(x) : x)
         )).join('')
+
+/*
+        // Convertit les variables de styles
+        state.page.styleVars[name] = this.buildStyleVars(state.page[name].styleVars) 
+
+        // Convertit les variables de script
+        const scriptLabels = {}
+        ___.scriptLabels?.forEach(l => scriptLabels[l] = ___.label[state.locale][l])
+        state.page.scriptVars[name] = this.buildScriptVars(state.page[name].scriptVars, scriptLabels) 
+  */      
+
+
+        if (name === 'Page') console.log(`<<< ${name} ${state.page.scriptVars?.Card?.length || 0}`)
+        return r
     }
 
     static async loadDependencies(Component, loaded, nested=false) {
+        const components = {}
+        components[Component.name] = Component
         for (let dep in Component.___.dependencies) {
-            if (dep in loaded) continue
-            loaded[dep] = (await import(Component.___.dependencies[dep])).default
-            if (nested) await this.loadDependencies(loaded[dep], loaded, true)
+            if (!(dep in loaded)) {
+                loaded[dep] = (await import(Component.___.dependencies[dep])).default
+            }
+            components[dep] = loaded[dep]
+            if (nested && Component.name != loaded[dep].name) {
+                const subComponents = await this.loadDependencies(loaded[dep], loaded, true)
+                for (const c in subComponents) components[c] = subComponents[c]
+            }
         }
+        return components
     }
 }
