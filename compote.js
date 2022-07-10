@@ -476,7 +476,7 @@ DEVELOPMENT:
                     mkdirCreated.push(filepath)
                 }
                 const component = new Component(Compote, state, route.params) //{ state: state, attributes: route.params, props: route.props })
-                output = await Compote.build(state, component)
+                output = await Compote.build(state, component, undefined, true)
                 nbCharacters += output.length
                 nbPages++
                 if (options.includes('--progress')) console.log(`${Math.round(output.length / 1024)}KB ${filepath}`)
@@ -1012,7 +1012,7 @@ async function compileTemplate(start, stop, depth=0, parentTag='') {
             case 'component':
                 n.tag = n._1st
                 const tag = n.tag['…'].slice(1)
-                if (n._1st._key === 'component') dependencies[tag] = ''
+                if (n._1st._key === 'component' && tag !== 'Compote') dependencies[tag] = ''
 
                 // Element sans enfant
                 if (n.tag._1st._key === 'closingElement') {

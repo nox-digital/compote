@@ -76,7 +76,15 @@ export default class Compote {
         '_': (state, instance, element, slot) => {
 
             const name = element._
-            const isComponent = name[0] === name[0].toUpperCase()
+
+            // Construit le slot
+            const slotBuilt = slot ? slot.map(pair => this.nextPair(state, instance, pair)) : undefined
+
+            if (name === 'Compote') {
+                return slot ? [ '', ...slotBuilt, `` ] : ''
+            }
+
+            const isComponent = name[0] === name[0].toUpperCase() && name !== 'Compote'
             const componentFound = isComponent && name in state.components
             let tag = `<${name}`
 
@@ -137,9 +145,6 @@ export default class Compote {
                 }
             }
 
-            // Construit le slot
-            const slotBuilt = slot ? slot.map(pair => this.nextPair(state, instance, pair)) : undefined
-
             // Transfert les arguments
             if (isComponent) {
                 if (componentFound) {
@@ -162,8 +167,7 @@ ___________________________________________________
 BUILD CODE ERROR - ${instance.constructor.name}
 \x1b[35m${code.toString()}
 \x1b[31m${e.toString()}
-    \x1b[31m${instance.cp.name}
-        ___________________________________________________
+___________________________________________________
 \x1b[0m`)
                 return ''
             }
@@ -192,7 +196,7 @@ BUILD CODE ERROR - ${instance.constructor.name}
             const arr = this.functions.code(state, instance, _.of)
             for (const v of arr) {
                 instance[_.v] = v
-                instance[_.v + '___index'] = idx++
+                instance[_.v + '_$i'] = idx++
                 map.push(slot.map(pair => this.nextPair(state, instance, pair)))
             }
             return map
@@ -206,7 +210,8 @@ BUILD CODE ERROR - ${instance.constructor.name}
             for (const k in obj) {
                 instance[_.k] = k
                 instance[_.v] = obj[k]
-                instance[_.v + '___index'] = idx++
+                instance[_.v + '_$i'] = idx++
+                instance[_.v + '_$k'] = k
                 map.push(slot.map(pair => this.nextPair(state, instance, pair)))
             }
             return map
@@ -388,7 +393,7 @@ BUILD CODE ERROR - ${instance.constructor.name}
         for (const label in labels) {
             const code = typeof labels[label] === 'string' 
                 ? `\`${labels[label]}\`` 
-                : `(_) => i18n(_, JSON.parse(${JSON.stringify(labels[label])}))`
+                : `(_) => i18n(_, JSON.parse(\`${JSON.stringify(labels[label])}\`))`
             list.push(`const ${label} = ${code};\n`)
         }
 
@@ -469,7 +474,6 @@ BUILD CODE ERROR - ${instance.constructor.name}
 
         // Remplace les scripts/styles après avoir construit entièrement la page
         if (newPage) {
-            console.log(`New page ${name} - rewrite`)
             const styles = []
             const scripts = []
             for (const name in state.components) {
