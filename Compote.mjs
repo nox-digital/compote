@@ -394,7 +394,7 @@ ___________________________________________________
             const code = typeof labels[label] === 'string' 
                 ? `\`${labels[label]}\`` 
                 : `(_) => i18n(_, JSON.parse(\`${JSON.stringify(labels[label])}\`))`
-            list.push(`const ${label} = ${code};\n`)
+            list.push(`self['${label}'] = ${code};\n`)
         }
 
         return list.length ? `\n${list.join("\n")}\n` : ''
@@ -412,6 +412,21 @@ ___________________________________________________
             return Compote.buildScriptVars(state.page[Component.name].scriptVars, scriptLabels)
         },
         */
+
+        price: (_) => {
+            const { $, price } = _
+            return new Intl.NumberFormat($.locale, { style: 'currency', currency: $.env.PUBLIC_CURRENCY, minimumFractionDigits: 2 })
+                .format(price)
+                .replace(',00', '')
+        },
+
+        priceTax: (_) => {
+            const { $, ht, tax, round = false, ceil = false, floor = false } = _
+
+            const p = (ht + (ht / 100 * (tax / 100))) / 100
+            const price = ceil ? Math.ceil(p) : (floor ? Math.floor(p) : (round ? Math.round(p): Number(p).toFixed(2)))
+            return this.fn.price({ $, price })
+        },
     }
 
 
