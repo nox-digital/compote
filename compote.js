@@ -258,7 +258,7 @@ const envFile = async (filename) => {
     const lines = env.trim().split("\n")
     for (const l of lines) {
        const line = l.trim()
-       if (line[0] === '#') continue
+       if (!line.length || line[0] === '#') continue
        const equals = line.indexOf('=')
        if (equals < 1) { 
            console.error(`Environment file format invalid`, { line })
