@@ -1532,7 +1532,7 @@ function idxElementName(index, loop) {
     for (; len < index.stop; len++) {
         const letter = index.text[loop.i + len]
         if (letter.toUpperCase() === letter.toLowerCase()
-        && !(letter >= '0' && letter <= '9')) break
+        && !(letter >= '0' && letter <= '9') && letter !== '-') break
     }
     return len
 }
