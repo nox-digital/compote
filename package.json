@@ -1,12 +1,29 @@
 {
-  "name": "compote",
-  "version": "1.0.0",
-  "description": "",
-  "main": "compote.js",
+  "name": "@nox-digital/compote",
+  "version": "0.8.220814",
+  "description": "Single File Component (SFC) to Static Site Generation (SSG). Development in progress, not ready for production.",
+  "main": "./compote.js",
+  "bin": "./compote.js",
   "type": "module",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "author": "",
-  "license": "ISC"
+  "author": "Guillaume / nox digital",
+  "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nox-digital/compote.git"
+  },
+  "keywords": [
+    "SSG",
+    "SFC",
+    "Jamstack",
+    "static",
+    "site",
+    "generation"
+  ],
+  "bugs": {
+    "url": "https://github.com/nox-digital/compote/issues"
+  },
+  "homepage": "https://github.com/nox-digital/compote#readme"
 }

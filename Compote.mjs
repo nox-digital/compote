@@ -427,6 +427,18 @@ ___________________________________________________
             const price = ceil ? Math.ceil(p) : (floor ? Math.floor(p) : (round ? Math.round(p): Number(p).toFixed(2)))
             return this.fn.price({ $, price })
         },
+
+        date: (date, _) => {
+            const d = typeof date === 'string' ? new Date(date) : date
+            const { $, time } = _
+            const options = {  }
+            return d.toLocaleDateString($.env.PUBLIC_LOCALE, options)
+        },
+
+        currency: (c) => {
+            if (c === 'EUR') return '€'
+            if (c === 'USD') return '$'
+        }
     }
 
 
@@ -511,16 +523,17 @@ ___________________________________________________
         return html
     }
 
-    static async loadDependencies(Component, loaded, nested=false) {
+    static async loadDependencies(Component, loaded, nested=false, directory='./') {
         const components = {}
         components[Component.name] = Component
         for (let dep in Component.___.dependencies) {
             if (!(dep in loaded)) {
-                loaded[dep] = (await import(Component.___.dependencies[dep])).default
+                const dependency = Component.___.dependencies[dep].replace('#compiled', '')
+                loaded[dep] = (await import(`${directory}/${dependency}`)).default
             }
             components[dep] = loaded[dep]
             if (nested && Component.name != loaded[dep].name) {
-                const subComponents = await this.loadDependencies(loaded[dep], loaded, true)
+                const subComponents = await this.loadDependencies(loaded[dep], loaded, true, directory)
                 for (const c in subComponents) components[c] = subComponents[c]
             }
         }

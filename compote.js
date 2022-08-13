@@ -1,11 +1,20 @@
+#! /usr/bin/env node
+
 import fs from 'fs/promises'
 import { inspect } from 'util'
+import path from 'path'
+import { fileURLToPath } from 'url'
+
 const customInspectSymbol = Symbol.for('nodejs.util.inspect.custom')
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
+const cwd = process.cwd()
+
 
 let http, https, Path, fsSync, execFileSync
 
 
-const compoteVersion = 220624
+const compoteVersion = 220714
 const defaultOptions = {
     syntax: {
 
@@ -32,16 +41,11 @@ const defaultOptions = {
         paths: {
             cache: './cache',
             public: './public',
-            pages: 'pages',
             compiled: './compiled',
+            pages: 'pages',
+            routes: 'compote.routes.mjs',
         },
-        routes: [
-            { match: /^index\.html$/, page: 'HomePage' },
-            { match: /^(\d{1,4})-(.*)/, page: 'ArticleListPage', args: [ 'id_list', 'slug' ] },
-            { match: /^(\d{5,12})-(.*)/, page: 'ArticlePage', args: [ 'id_article', 'slug' ] },
-            { match: 404, page: 'NotFoundPage', args: [ 'path', 'query' ] },
-        ],
-
+        routes: [],
     }
 }
 const compiled = {}
@@ -126,6 +130,7 @@ const splitURL = (u) => {
 const router = (url) => {
     const u = splitURL(url)
     const args = {}
+
     for (const r of defaultOptions.server.routes) {
         if (Number.isInteger(r.match)) continue
         const match = u.path.match(r.match)
@@ -146,6 +151,7 @@ const router = (url) => {
 
 async function server(request, response) {
 
+    
     console.log('HTTP request ', request.url)
     const url = request.url.at(-1) === '/' ? `${request.url}index.html` : request.url
     let filePath
@@ -153,7 +159,6 @@ async function server(request, response) {
     // Route demandée
     let ssr
     if (options.includes('--dev')) {
-        
         ssr = (route) => {
             // Vérifie que le chemin indiqué par la route existe puis l'importe
             const componentPath = `${defaultOptions.server.paths.compiled}/${route.page}.tpl.mjs`.replaceAll('//', '/')
@@ -280,12 +285,16 @@ async function build(component, attributes, response) {
         delete process.env.ENV
     }
 
+    let compiledPath = `${cwd}/${argsWithoutOptions[1]}`
+                        .replaceAll('/./', '/')
+                        .replaceAll('//', '/')
+    if (compiledPath.at(-1) === '/') compiledPath = compiledPath.slice(0, -1)
     const workerCode = `
     
         const build = async () => {
             const [ , , component, attributesJSON ] = process.argv
             const attributes = JSON.parse(attributesJSON)
-            const Compote = (await import('${defaultOptions.server.paths.compiled}/Compote.mjs')).default
+            const Compote = (await import('${__dirname}/Compote.mjs')).default
             const RequestedComponent = (await import(component)).default
             const {parentPort, workerData} = (await import('worker_threads'))
 
@@ -294,7 +303,7 @@ async function build(component, attributes, response) {
             const state = { env, locale: env.PUBLIC_LANG || 'fr', components: {} }
 
             state.components[RequestedComponent.name] = RequestedComponent
-            await Compote.loadDependencies(RequestedComponent, state.components, true)
+            await Compote.loadDependencies(RequestedComponent, state.components, true, '${compiledPath}')
             const requestedComponent = new RequestedComponent(Compote, state, attributes)        
             output = await Compote.build(state, requestedComponent, undefined, true)
             parentPort.postMessage(output)
@@ -336,10 +345,13 @@ async function start(args=[], options=[]) {
     forStack.length = 0
     
     const [ src, out, json ] = args.filter(a => !a.startsWith('--'))
-
     if (!args.length || !src || !out) {
         console.log(`
-COMPILATION:
+
+COMPOTE version ${compoteVersion}
+
+
+Compilation:
 ------------
     node compote <source> <destination> [options]
 
@@ -353,7 +365,7 @@ COMPILATION:
     node compote --watch ./src/ ./compiled/
 
 
-BUILD:
+Build:
 ------
 
     By file with optional JSON parameters:
@@ -363,7 +375,7 @@ BUILD:
     node compote --build-pages ./compiled/ ./build/
 
 
-DEVELOPMENT:
+Developement:
 ------------
     Development web server with auto-compilation and building based on .env file or folder:
     node compote --dev ./src/ ./compiled/
@@ -375,6 +387,17 @@ DEVELOPMENT:
 
     // Auto-compilation
     if (options.includes('--watch') || options.includes('--dev')) {
+
+
+        // Charge les dépendences
+        const routesFile = defaultOptions.server.paths.routes
+        const exists = await fs.stat(`${cwd}/${routesFile}`)
+            .catch(e => console.warn(`\x1b[34mRoutes file ${routesFile} not found, switch to auto-detect mode\x1b[0m `))
+        if (exists) {
+            const routes = (await import(`${cwd}/${routesFile}`)).default
+            if (routes) defaultOptions.server.routes = routes
+            else console.error(`Error inside your routes configuration ${routesFile}`)
+        }
 
         const dedup = {}
         fsSync = (await import('fs')).default
@@ -446,18 +469,20 @@ DEVELOPMENT:
 
         const env = {}
         Object.keys(process.env).filter(k => k.startsWith('PUBLIC_')).map(k => env[k] = process.env[k])
-        const Compote = (await import(`${src}/Compote.mjs`)).default
+        const Compote = (await import(`${__dirname}/Compote.mjs`)).default
         const state = { env, locale: env.PUBLIC_LANG || 'fr', components: {}, allComponents: {} }
+        
         const mkdirCreated = []
         let output = ''
         let nbCharacters = 0
         let nbPages = 0
+        let cwdSrc = `${cwd}/${src}`.replaceAll('/./', '/').replaceAll('//', '/')
+        if (cwdSrc.at(-1) === '/') cwdSrc = cwdSrc.slice(0, -1)
         for (const page of pages) {
-            
-            const Component = (await import(`${src}/${page}`)).default
+            const Component = (await import(`${cwdSrc}/${page}`)).default
             state.allComponents[Component.name] = Component
             const routes = await Component.routes()
-            state.components = await Compote.loadDependencies(Component, state.allComponents, true)
+            state.components = await Compote.loadDependencies(Component, state.allComponents, true, cwdSrc)
             const prefix = `${out}/${env.PUBLIC_DOMAIN}/public/`
             await fs.mkdir(prefix, { recursive: true })
             console.log(`${page} ${routes.length}x... => ${prefix}`)
@@ -1193,6 +1218,10 @@ async function attributesAndConditions(start, stop, closer, type) {
 
      const attrExpression = async (from, attribute) => {
 
+        if (!('end' in from)) {
+            console.warn('end of attribute error', { from, attribute })
+            return 1
+        }
         const attrCompiled = await compileTemplate(from._, from.end.$)
         const aa = attributes[attribute] = attrCompiled[0]
 
