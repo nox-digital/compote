@@ -523,7 +523,9 @@ ___________________________________________________
         return html
     }
 
-    static async loadDependencies(Component, loaded, nested=false, directory='./') {
+    static async loadDependencies(Component, loaded, nested=false, compiledPath='./') {
+        const directory = compiledPath.indexOf('.') === -1 ? compiledPath
+                        : compiledPath.split('/').slice(0, -1).join('/')
         const components = {}
         components[Component.name] = Component
         for (let dep in Component.___.dependencies) {

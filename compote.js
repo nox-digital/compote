@@ -4,17 +4,22 @@ import fs from 'fs/promises'
 import { inspect } from 'util'
 import path from 'path'
 import { fileURLToPath } from 'url'
+import { start } from 'repl'
 
 const customInspectSymbol = Symbol.for('nodejs.util.inspect.custom')
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
+
 const cwd = process.cwd()
+const app = {
+    devMode: false,
+}
 
 
 let http, https, Path, fsSync, execFileSync
 
 
-const compoteVersion = 220714
+let compoteVersion
 const defaultOptions = {
     syntax: {
 
@@ -103,9 +108,40 @@ class Slot {
 }
 
 
+const version = async () => {
+    if (compoteVersion) return compoteVersion
+    if (!fsSync) fsSync = (await import('fs')).default
+
+    const json = JSON.parse(
+        await fs.readFile(
+          new URL(`${__dirname}/package.json`, import.meta.url)
+        )
+      )
+    compoteVersion = json?.version ?? '?'
+    return compoteVersion
+}
+
+const configFile = async () => {
+    if (defaultOptions.configFile) return
+    if (!fsSync) fsSync = (await import('fs')).default
+
+    try {
+
+        defaultOptions.configFile = JSON.parse(
+            await fs.readFile(
+                new URL(`${cwd}/compote.json`, import.meta.url)
+            )
+        )
+    }
+    catch (e) {
+        console.error(`compote.json format invalid`, e)
+    }
+    return
+}
+
 function exit(error, details, code = 1) {
     console.dir({ error, details }, { depth: Infinity})
-    if (process.argv.includes('--dev')) {
+    if (app.devMode) {
         console.log('________________________________________')
         return
     }
@@ -158,18 +194,18 @@ async function server(request, response) {
 
     // Route demandée
     let ssr
-    if (options.includes('--dev')) {
+    if (app.devMode) {
         ssr = (route) => {
             // Vérifie que le chemin indiqué par la route existe puis l'importe
-            const componentPath = `${defaultOptions.server.paths.compiled}/${route.page}.tpl.mjs`.replaceAll('//', '/')
-            if (!fsSync.existsSync(componentPath)) {
-                console.error(`Component « ${route.page} » not found`, { url, route, componentPath })
+            const compiledPath = addPaths(defaultOptions.server.paths.compiled, `${route.page}.tpl.mjs`)
+            if (!fsSync.existsSync(compiledPath)) {
+                console.error(`Component « ${route.page} » not found`, { url, route, compiledPath })
                 response.writeHead(418)
                 return response.end(``)
             }
     
             try { 
-                build(componentPath, route.args, response)
+                build(compiledPath, route.args, response)
             }
             catch (e) {            
                 console.error('\x1b[35m%s\x1b[0m', `BUILD ERROR:\n${e.toString()}`)
@@ -209,9 +245,8 @@ async function server(request, response) {
 
 
     // Aucune route ne correspond, on renvoie le fichier demandé du dossier public
-    const staticPath = options.includes('--dev') 
-        ? (process.env.PUBLIC_STATIC || defaultOptions.server.paths.public)
-        : `${argsWithoutOptions[1]}/${process.env.PUBLIC_DOMAIN}/public`
+    const staticPath = app.devMode  ? (process.env.PUBLIC_STATIC || defaultOptions.server.paths.public)
+                                : `${argsWithoutOptions[1]}/${process.env.PUBLIC_DOMAIN}/public`
     filePath = filePath ? filePath : `${staticPath}${url}`
     const extname = String(Path.extname(filePath)).toLowerCase()
     if (!extname) filePath += '/index.html'
@@ -275,8 +310,28 @@ const envFile = async (filename) => {
     }
 }
 
+const addPaths = (...paths) => {
+    let all = []
+    for (let path of paths) {
 
-async function build(component, attributes, response) {
+        // Convert next paths starts
+        if (all.length) {
+            if (path.startsWith('./')) path = path.slice(2)
+            else if (path.at(0) === '/') path = path.slice(1)
+        }
+
+        // Missing first path fallback
+        else if (!path) path = './'
+
+        // Trailing slash
+        if (path.at(-1) === '/') path = path.slice(0, -1)
+        all.push(path)
+    }
+    return all.join('/')
+}
+
+
+async function build(compiledFilePath, attributes, response) {
 
     const { Worker, MessageChannel, MessagePort, isMainThread, parentPort } = (await import('worker_threads'))
 
@@ -285,13 +340,9 @@ async function build(component, attributes, response) {
         delete process.env.ENV
     }
 
-    let compiledPath = `${cwd}/${argsWithoutOptions[1]}`
-                        .replaceAll('/./', '/')
-                        .replaceAll('//', '/')
-    if (compiledPath.at(-1) === '/') compiledPath = compiledPath.slice(0, -1)
+    let compiledFullPath = addPaths(cwd, compiledFilePath)
     const workerCode = `
-    
-        const build = async () => {
+        const worker = async () => {
             const [ , , component, attributesJSON ] = process.argv
             const attributes = JSON.parse(attributesJSON)
             const Compote = (await import('${__dirname}/Compote.mjs')).default
@@ -303,14 +354,14 @@ async function build(component, attributes, response) {
             const state = { env, locale: env.PUBLIC_LANG || 'fr', components: {} }
 
             state.components[RequestedComponent.name] = RequestedComponent
-            await Compote.loadDependencies(RequestedComponent, state.components, true, '${compiledPath}')
+            await Compote.loadDependencies(RequestedComponent, state.components, true, '${compiledFullPath}')
             const requestedComponent = new RequestedComponent(Compote, state, attributes)        
             output = await Compote.build(state, requestedComponent, undefined, true)
             parentPort.postMessage(output)
         }
-        build()
+        worker()
     `
-    const compote = new Worker(workerCode, { eval: true, argv: [ component, JSON.stringify(attributes) ] })
+    const compote = new Worker(workerCode, { eval: true, argv: [ compiledFilePath, JSON.stringify(attributes) ] })
     compote.once('message', content => {
         response.writeHead(200, { 'Content-Type': 'text/html' })
         response.end(content, 'utf-8')
@@ -324,10 +375,12 @@ async function build(component, attributes, response) {
 
 
 
-// async function start(filePath, out) {
-async function start(args=[], options=[]) {
+async function compote(args=[]) {
 
     const startTime = new Date()
+    const argsWithoutOptions = args.filter(a => !a.startsWith('--'))
+    const options = args.filter(a => a.startsWith('--'))
+    
 
     // Initialisation
     compiled.param = {}
@@ -344,8 +397,57 @@ async function start(args=[], options=[]) {
     for (const k in routes) delete routes[k]
     forStack.length = 0
     
-    const [ src, out, json ] = args.filter(a => !a.startsWith('--'))
-    if (!args.length || !src || !out) {
+    let srcPath, compiledPath, buildPath, json
+    let required = {}
+    let errorMessage 
+
+    if (options.includes('--dist')) {
+        [ srcPath, compiledPath, buildPath ] = argsWithoutOptions
+        required = { srcPath, compiledPath, buildPath }
+        errorMessage = `missing path parameter\nnpx compote --dist <src path> <compiled path> <build path>`
+    }
+    else if (options.includes('--build')) {
+        [ compiledPath, buildPath, json ] = argsWithoutOptions       
+        required = { compiledPath, buildPath }
+        errorMessage = `missing path parameter\nnpx compote --build <compiled path> <build path> [json]`
+    } 
+    else if (options.includes('--build-pages')) {
+        [ compiledPath, buildPath ] = argsWithoutOptions
+        required = { compiledPath, buildPath }
+        errorMessage = `missing path parameter\nnpx compote --build-pages <compiled path> <build path>`
+    }
+    else if (options.includes('--compile') || options.includes('--watch')) {
+        [ srcPath, compiledPath ] = argsWithoutOptions
+        required = { srcPath, compiledPath }
+        errorMessage = `missing path parameter\nnpx compote --compile <src path> <compiled path>`
+    }
+    else if (options.includes('--dev')) {
+        [ srcPath, compiledPath ] = argsWithoutOptions
+        required = { srcPath, compiledPath }
+        errorMessage = `missing path parameter\nnpx compote --dev <src path> <compiled path>`
+    }
+
+    if (('srcPath' in required && !required.srcPath)
+    || ('compiledPath' in required && !required.compiledPath)
+    || ('buildPath' in required && !required.buildPath)) {
+        await configFile()
+        const conf = defaultOptions.configFile
+        if (conf.src) srcPath = conf.src
+        if (conf.compiled) compiledPath = conf.compiled
+        if (conf.build) buildPath = conf.build
+    
+        if (('srcPath' in required && !srcPath)
+        || ('compiledPath' in required && !compiledPath)
+        || ('buildPath' in required && !buildPath)) {
+            console.error(errorMessage, Object.values(required))
+            process.exit(1)
+        }
+    }
+
+
+    if (!args.length || options.includes('--help')) {
+
+        await version()
         console.log(`
 
 COMPOTE version ${compoteVersion}
@@ -353,37 +455,41 @@ COMPOTE version ${compoteVersion}
 
 Compilation:
 ------------
-    node compote <source> <destination> [options]
 
     By component:
-    node compote ./src/Component.html ./compiled/Component.tpl.mjs
+    npx compote --compile ./src/Component.html ./compiled/ 
 
     By folder:
-    node compote ./src/ ./compiled/
+    npx compote --compile ./src/ ./compiled/
 
     Compile folder and watch changes to auto-compilation: 
-    node compote --watch ./src/ ./compiled/
+    npx compote --watch ./src/ ./compiled/
 
 
 Build:
 ------
 
     By file with optional JSON parameters:
-    node compote --build ./compiled/Component.tpl.mjs ./build/index.html {json}
+    npx compote --build ./compiled/Component.tpl.mjs ./build/index.html {json}
 
     Build all pages, based on .env file or folder:
-    node compote --build-pages ./compiled/ ./build/
+    npx compote --build-pages ./compiled/ ./build/
+
+
+Distribution:
+-------------
+
+    Compilation and build all pages
+    npx compote --dist ./src/ ./compiled/ ./build/
 
 
 Developement:
 ------------
     Development web server with auto-compilation and building based on .env file or folder:
-    node compote --dev ./src/ ./compiled/
+    npx compote --dev ./src/ ./compiled/
         `)
         process.exit(1)
     }
-
-    const paths = defaultOptions.server.paths
 
     // Auto-compilation
     if (options.includes('--watch') || options.includes('--dev')) {
@@ -412,12 +518,12 @@ Developement:
             clearTimeout(dedup[filepath])
             dedup[filepath] = setTimeout(() => { 
                 console.log(`\ncomponent ${name}${ext} ${eventType}`)
-                const outfile = `${out}/${name}.tpl.mjs`.replaceAll('//', '/')
-                start([ filepath, outfile ]) //filepath.replace(paths.templates, paths.components).replace('.html', '.tpl.mjs') ])
+                const outfile = addPaths(compiledPath, `${name}.tpl.mjs`)
+                compote([ '--compile', filepath, outfile ]) //filepath.replace(paths.templates, paths.components).replace('.html', '.tpl.mjs') ])
             })
         }
 
-        const directories = await directoryTree(src.at(-1) === '/' ? src.slice(0, -1) : src)
+        const directories = await directoryTree(srcPath.at(-1) === '/' ? srcPath.slice(0, -1) : srcPath)
         for (const dir of directories) {
             console.log('watch directory ', dir)
             fsSync.watch(dir, (ev, file) => onchange(dir, ev, file))
@@ -428,6 +534,7 @@ Developement:
     // Build environment
     if (options.includes('--build') 
         || options.includes('--build-pages')
+        || options.includes('--dist')
         || options.includes('--dev')) {
             await envFile('.env')
     }
@@ -435,9 +542,9 @@ Developement:
 
     // Construction d'un composant compilé à un fichier .html
     if (options.includes('--build')) {
-        if (!src) exit(`Missing compiled component source to build`)
-        if (!out || ['"', "'", '{'].includes(out.at(0))) exit(`Missing HTML file destination to build`)
-        console.log(`construction du composant ${src} => ${out}`)
+        if (!compiledPath) exit(`Missing compiled component source to build`)
+        if (!buildPath || ['"', "'", '{'].includes(buildPath.at(0))) exit(`Missing HTML file destination to build`)
+        console.log(`construction du composant ${compiledPath} => ${buildPath}`)
         let attributes = {}
         try { 
             if (json) attributes = JSON.parse(json) 
@@ -445,26 +552,29 @@ Developement:
         catch (e) { 
             exit(`Error when parsing JSON parameters: ${e} « ${json} »`) 
         }
-        const html = await build(src, attributes, {
+        const html = await build(compiledPath, attributes, {
             writeHead: (code, message) => console.dir({code, message}),
             response: (response) => console.log({response}),
-            end: (content, encoding) => fs.writeFile(out, content, { encoding })
+            end: (content, encoding) => fs.writeFile(buildPath, content, { encoding })
                                             .catch(e => console.log)
-        })
+            })
         // console.log(html)
         return
     }
 
     // Construction de toutes les pages
-    if (options.includes('--build-pages') && !options.includes('--bypass-build')) {
+    if ((options.includes('--build-pages') || options.includes('--dist'))
+    && !options.includes('--bypass-build')) {
 
-        // Compile d'abord l'ensemble des components
-        // TODO
+        // Compile l'ensemble des components
+        if (options.includes('--dist')) {
+            await compote([ '--build', srcPath, compiledPath ])
+        }
 
 
 
         // Recherche les composants terminant par « Page.tpl.mjs »
-        const pages = (await fs.readdir(src))
+        const pages = (await fs.readdir(compiledPath))
             .filter(f => f.indexOf('Page.tpl.mjs') > 0)
 
         const env = {}
@@ -476,13 +586,13 @@ Developement:
         let output = ''
         let nbCharacters = 0
         let nbPages = 0
-        let cwdSrc = `${cwd}/${src}`.replaceAll('/./', '/').replaceAll('//', '/')
-        if (cwdSrc.at(-1) === '/') cwdSrc = cwdSrc.slice(0, -1)
+        let compiledFullPath = addPaths(cwd, compiledPath)
+        if (compiledFullPath.at(-1) === '/') compiledFullPath = compiledFullPath.slice(0, -1)
         for (const page of pages) {
-            const Component = (await import(`${cwdSrc}/${page}`)).default
+            const Component = (await import(`${compiledFullPath}/${page}`)).default
             state.allComponents[Component.name] = Component
             const routes = await Component.routes()
-            state.components = await Compote.loadDependencies(Component, state.allComponents, true, cwdSrc)
+            state.components = await Compote.loadDependencies(Component, state.allComponents, true, compiledFullPath)
             const prefix = `${out}/${env.PUBLIC_DOMAIN}/public/`
             await fs.mkdir(prefix, { recursive: true })
             console.log(`${page} ${routes.length}x... => ${prefix}`)
@@ -516,26 +626,11 @@ Developement:
 
     }
 
-
-    // Compilation d'une source explicite
-    const srcFolder = (src.at(-1) === '/' || src.indexOf('.') === -1)
-    if (srcFolder) {
-
-        const templates = await findComponentFiles(src.at(-1) === '/' ? src.slice(0, -1) : src)
-        for (const name in templates) {
-            if ('html' in templates[name]) {
-                const html = `${templates[name].html}`
-                const outfile = `${out}/${name}.tpl.mjs`.replaceAll('//', '/')
-                await start([ html, outfile ])
-            }
-        }
-    }
-    
-
     // Serveur web
     if (options.includes('--dev')
     || options.includes('--build-pages')) {
 
+        if (options.includes('--dev')) app.devMode = true
         if (process.env.DEV_PORT) defaultOptions.server.port = process.env.DEV_PORT
         if (process.env.PUBLIC_NAME) defaultOptions.server.paths.cache += `/${process.env.PUBLIC_NAME}`
         if (!fsSync) fsSync = (await import('fs')).default
@@ -546,128 +641,155 @@ Developement:
         Path = (await import('path')).default
         // execFileSync = (await import('child_process')).execFileSync
 
-        // Créé un serveur web en attente de connexion
+        // Créé un serveur web n attente de connexion
+
         http.createServer(server).listen(defaultOptions.server.port)
-        console.log(`\nServer running at http://localhost:${defaultOptions.server.port}/\n`);
+        console.log(`\n${app.devMode ? 'Development' : 'Static'} server listening at http://localhost:${defaultOptions.server.port}/\n`);
         return
     }
 
 
     
     // Fichier source => out
-    console.log(`Compilation of ${src}`)
-
-    // Prépare les variables
-    for (const d in dependencies) delete dependencies[d]
-
-
-    const idx = { lastSlash: src.lastIndexOf('/') }
-    const name = idx.lastSlash > -1 ? src.replace('.html', '').slice(idx.lastSlash + 1) : src
-    const path = idx.lastSlash > -1 ? src.slice(0, idx.lastSlash) : './'
-
-    // Lit le fichier HTML
-    const file = await fs.readFile(src.replace('.html', '') + '.html', { encoding: 'utf-8' })
-        .catch(e => exit(`can't read the file ${src}.html !`, e))
-
-
-    // Sépare les sections
-    await sections(path, name, file)
-        .catch(e => exit(e))
-
-    if (code.style) compiled.style = code.style // compileStyle()
-    code.style = null
-
-    if (code.script) compiled.script = code.script // compileScript()
-    code.script = null
-
-    if (code.param) compiled.param = await compileData(code.param, 0)
-        .catch(e => exit(`compile param ERROR`, e))
-    code.param = null
-
-    if (code.var) compiled.var = await compileData(code.var, 0)
-        .catch(e => exit(`compile data ERROR`, e))
-    code.var = null
-
-    if (code.data) compiled.data = await compileData(code.data, 0)
-        .catch(e => exit(`compile data ERROR`, e))
-    code.data = null
-
-    if (code.label) [compiled.label, compiled.scriptLabels] = await compileLabel(code.label, name)
-        .catch(e => exit(`compile label ERROR`, e))
-    code.data = null
-
-    if (code.template) compiled.template = await compileTemplate(0, code.template.length)
-        .catch(e => exit(`compile data ERROR`, e))
-    code.template = null
-    setContext(compiled.template, [])
-
-
-    // Gère les chemins d'accès à ses composants
-    for (const dep in dependencies) {
-        dependencies[dep] = `#compiled/${dep}.tpl.mjs`
-        // const exists = await fs.stat(dependencies[dep])
-            // .catch(e => console.warn(`\x1b[31mDependence ${dep} not found\x1b[0m `))
-    }
-
-    // Vérifie s'il y a un fichier .mjs associé et l'inclus dans le code
-    const mjs = await fs.readFile(src.replace('.html', '.mjs'), { encoding: 'utf-8' })
-        .catch(e => null)
-
-    const idxClass = mjs ? mjs.indexOf(`class ${name}`) : -1
-    const idxBracket = idxClass > -1 ? mjs.indexOf('{', idxClass) : -1
-    let imports = ''
-    let extend = ''
-    if (mjs) {
-        if (idxClass === -1 || idxBracket === -1) {
-            console.error(`${name}.mjs doesn't include "class ${name}" or his bracket "{`)
-        } else {
-            extend = mjs.slice(idxBracket + 1, mjs.lastIndexOf('}'))
-            const idxClassLine = mjs.lastIndexOf('\n', idxClass)
-            if (idxClassLine > -1) imports = mjs.slice(0, idxClassLine + 1)
+    const doCompile = options.includes('--compile') || options.includes('--watch')
+    const srcFolder = srcPath && (srcPath.at(-1) === '/' || srcPath.indexOf('.') === -1)
+    
+    
+    // Compilation d'un dossier
+    if (doCompile && srcFolder) {
+    
+        console.log(`Compilation of directory ${srcPath}`)
+        const templates = await findComponentFiles(srcPath.at(-1) === '/' ? srcPath.slice(0, -1) : srcPath)
+        for (const name in templates) {
+            if ('html' in templates[name]) {
+                const html = `${templates[name].html}`
+                await compote([ '--compile', html, compiledPath ])
+            }
         }
     }
 
-    // Génère le source de sortie
-    const opt = { depth: Infinity, colors: false }
-    const rawScript = compiled.script.replaceAll('`', '\\`').replaceAll('${', '\\${')
-    let output = `${imports}export default class ${name} {
-    static ___ = {
-        compote: ${compoteVersion},
-        component: ${name},
-        dependencies: ${inspect(dependencies, opt)},
-        prepared: 0,
-        setup:  ${inspect(compiled.setup, opt)},
-        param: ${inspect(compiled.param, opt)},
-        var: ${inspect(compiled.var, opt)},
-        data: ${inspect(compiled.data, opt)},
-        label: ${inspect(compiled.label, opt)},
-        scriptLabels: ${inspect(compiled.scriptLabels, opt)},
-        script:  ${rawScript ? ['\`', rawScript, '\`'].join('') : "''" },
-        style:  ${compiled.style ? ['\`', compiled.style.replaceAll('`', '\\'), '\`'].join('') : "''"},
-        template:  ${inspect(compiled.template, opt)},
+    // Compilation d'un composant explicite
+    if (doCompile && !srcFolder) {
+
+        if (compiledPath.indexOf('.') > -1) {
+            console.error(`compiled path need to be a directory`, { srcPath, compiledPath })
+            process.exit(1)
+        }
+
+        console.log(`Compilation of file ${srcPath}`)
+
+        // Prépare les variables
+        for (const d in dependencies) delete dependencies[d]
+
+
+        const idx = { lastSlash: srcPath.lastIndexOf('/') }
+        const name = idx.lastSlash > -1 ? srcPath.replace('.html', '').slice(idx.lastSlash + 1) : srcPath
+        const path = idx.lastSlash > -1 ? srcPath.slice(0, idx.lastSlash) : './'
+
+        // Lit le fichier HTML
+        const file = await fs.readFile(srcPath.replace('.html', '') + '.html', { encoding: 'utf-8' })
+            .catch(e => exit(`can't read the file ${srcPath}.html !`, e))
+
+
+        // Sépare les sections
+        await sections(path, name, file)
+            .catch(e => exit(e))
+
+        if (code.style) compiled.style = code.style // compileStyle()
+        code.style = null
+
+        if (code.script) compiled.script = code.script // compileScript()
+        code.script = null
+
+        if (code.param) compiled.param = await compileData(code.param, 0)
+            .catch(e => exit(`compile param ERROR`, e))
+        code.param = null
+
+        if (code.var) compiled.var = await compileData(code.var, 0)
+            .catch(e => exit(`compile data ERROR`, e))
+        code.var = null
+
+        if (code.data) compiled.data = await compileData(code.data, 0)
+            .catch(e => exit(`compile data ERROR`, e))
+        code.data = null
+
+        if (code.label) [compiled.label, compiled.scriptLabels] = await compileLabel(code.label, name)
+            .catch(e => exit(`compile label ERROR`, e))
+        code.data = null
+
+        if (code.template) compiled.template = await compileTemplate(0, code.template.length)
+            .catch(e => exit(`compile data ERROR`, e))
+        code.template = null
+        setContext(compiled.template, [])
+
+
+        // Gère les chemins d'accès à ses composants
+        for (const dep in dependencies) {
+            dependencies[dep] = `#compiled/${dep}.tpl.mjs`
+            // const exists = await fs.stat(dependencies[dep])
+                // .catch(e => console.warn(`\x1b[31mDependence ${dep} not found\x1b[0m `))
+        }
+
+        // Vérifie s'il y a un fichier .mjs associé et l'inclus dans le code
+        const mjs = await fs.readFile(srcPath.replace('.html', '.mjs'), { encoding: 'utf-8' })
+            .catch(e => null)
+
+        const idxClass = mjs ? mjs.indexOf(`class ${name}`) : -1
+        const idxBracket = idxClass > -1 ? mjs.indexOf('{', idxClass) : -1
+        let imports = ''
+        let extend = ''
+        if (mjs) {
+            if (idxClass === -1 || idxBracket === -1) {
+                console.error(`${name}.mjs doesn't include "class ${name}" or his bracket "{`)
+            } else {
+                extend = mjs.slice(idxBracket + 1, mjs.lastIndexOf('}'))
+                const idxClassLine = mjs.lastIndexOf('\n', idxClass)
+                if (idxClassLine > -1) imports = mjs.slice(0, idxClassLine + 1)
+            }
+        }
+
+        // Génère le source de sortie
+        const opt = { depth: Infinity, colors: false }
+        const rawScript = compiled.script.replaceAll('`', '\\`').replaceAll('${', '\\${')
+        await version()
+        let output = `${imports}export default class ${name} {
+        static ___ = {
+            compote: '${compoteVersion}',
+            component: ${name},
+            dependencies: ${inspect(dependencies, opt)},
+            prepared: 0,
+            setup:  ${inspect(compiled.setup, opt)},
+            param: ${inspect(compiled.param, opt)},
+            var: ${inspect(compiled.var, opt)},
+            data: ${inspect(compiled.data, opt)},
+            label: ${inspect(compiled.label, opt)},
+            scriptLabels: ${inspect(compiled.scriptLabels, opt)},
+            script:  ${rawScript ? ['\`', rawScript, '\`'].join('') : "''" },
+            style:  ${compiled.style ? ['\`', compiled.style.replaceAll('`', '\\'), '\`'].join('') : "''"},
+            template:  ${inspect(compiled.template, opt)},
+        }
+
+        constructor(Compote, state, attributes, slot) {
+            Compote.componentConstructor(this, ${name}, state, attributes, slot)
+        }\n${extend}}`
+        Object.keys(compiled).forEach((k,i) => compiled[i] = null)
+
+        // Destination
+        const outputFile = addPaths(compiledPath, `${name}.tpl.mjs`)
+        const outputPath = outputFile.slice(0, outputFile.lastIndexOf('/'))
+
+        // Vérifie l'existence ou crée le chemin de destination
+        if (!fsSync) fsSync = (await import('fs')).default
+        if (!(await fsSync.existsSync(outputPath))) {
+            console.log(`create path ${outputPath}`)
+            await fs.mkdir(outputPath, { recursive: true })
+        }
+
+        // Enregistre le fichier
+        await fs.writeFile(outputFile, output)
+            .catch(e => exit(`can't write the file ${outputFile} !`, e))
+
     }
-
-    constructor(Compote, state, attributes, slot) {
-        Compote.componentConstructor(this, ${name}, state, attributes, slot)
-    }\n${extend}}`
-    Object.keys(compiled).forEach((k,i) => compiled[i] = null)
-
-    // Destination
-    const outputFile = out || src.replace('.html', '') + '.tpl.mjs'
-    const outputPath = outputFile.slice(0, outputFile.lastIndexOf('/'))
-
-    // Vérifie l'existence ou crée le chemin de destination
-    if (!fsSync) fsSync = (await import('fs')).default
-    if (!(await fsSync.existsSync(outputPath))) {
-        console.log(`create path ${outputPath}`)
-        await fs.mkdir(outputPath, { recursive: true })
-    }
-
-    // Enregistre le fichier
-    await fs.writeFile(outputFile, output)
-        .catch(e => exit(`can't write the file ${outputFile} !`, e))
-
-
 }
 
 
@@ -1645,9 +1767,4 @@ function mergeObjects(set, defaults) {
 
 
 
-const args = process.argv.slice(2)
-const argsWithoutOptions = args.filter(a => !a.startsWith('--'))
-const options = args.filter(a => a.startsWith('--'))
-start(args, options)
-// const [ , , filePath, out ] = process.argv
-// start(filePath, out)
+compote(process.argv.slice(2))
