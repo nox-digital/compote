@@ -419,7 +419,7 @@ async function initProject() {
     }
 
     const ignore = [
-        '.compose/',
+        '.compote/',
         'dist/',
     ]
     console.log(`\nIgnore theses files in your distributed version control (eg: gitignore) file:\n${ignore.join("\n")}`)
