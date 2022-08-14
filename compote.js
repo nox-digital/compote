@@ -381,7 +381,8 @@ async function build(compiledFilePath, attributes, response) {
 
 const isFile = (path) => {
     if (path.at(-1) === '/') return false
-    return (path.startsWith('./') ? path.slice(2) : path).lastIndexOf('.') > -1
+    const parts = path.split('/')
+    return (parts.at(-1).slice(1).indexOf('.') > -1)
 }
 
 async function initProject() {
@@ -424,7 +425,7 @@ async function initProject() {
     ]
     console.log(`\nIgnore theses files in your distributed version control (eg: gitignore) file:\n${ignore.join("\n")}`)
 
-    console.log(`\n\nCreating compose.json config file...`)
+    console.log(`\n\nCreating compote.json config file...`)
     await fs.writeFile(configFile, defaultConfigString, { encoding: 'utf-8' })
         .catch(e => console.error(`can't write ${configFile} file`))
 

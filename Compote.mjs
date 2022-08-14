@@ -524,8 +524,14 @@ ___________________________________________________
     }
 
     static async loadDependencies(Component, loaded, nested=false, compiledPath='./') {
-        const directory = compiledPath.indexOf('.') === -1 ? compiledPath
-                        : compiledPath.split('/').slice(0, -1).join('/')
+        const isFile = (path) => {
+            if (path.at(-1) === '/') return false
+            const parts = path.split('/')
+            return (parts.at(-1).slice(1).indexOf('.') > -1)
+        }
+        
+        const directory = isFile(compiledPath)  ? compiledPath.split('/').slice(0, -1).join('/')
+                                                : compiledPath
         const components = {}
         components[Component.name] = Component
         for (let dep in Component.___.dependencies) {
