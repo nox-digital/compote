@@ -397,13 +397,13 @@ async function initProject() {
     const defaultConfig = {
         "paths": {
             "src": "./src/components",
-            "compiled": "./compote/compiled",
+            "compiled": "./.compote/compiled",
             "dist": "./dist"	
         },
         "server": {
             "paths": {
                 "public": "./public",
-                "cache": "./compote/cache"
+                "cache": "./.compote/cache"
             }
         },
         "routes": [
