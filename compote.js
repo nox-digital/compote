@@ -6,7 +6,6 @@ import fs from 'fs/promises'
 import { inspect } from 'util'
 import path from 'path'
 import { fileURLToPath } from 'url'
-import { start } from 'repl'
 
 const customInspectSymbol = Symbol.for('nodejs.util.inspect.custom')
 const __filename = fileURLToPath(import.meta.url)
@@ -48,8 +47,6 @@ const defaultOptions = {
         paths: {
             cache: './cache',
             public: './public',
-            compiled: './compiled',
-            pages: 'pages',
         },
         routes: [],
     }
@@ -200,15 +197,15 @@ async function server(request, response) {
     if (app.devMode) {
         ssr = (route) => {
             // Vérifie que le chemin indiqué par la route existe puis l'importe
-            const compiledPath = addPaths(defaultOptions.server.paths.compiled, `${route.page}.tpl.mjs`)
-            if (!fsSync.existsSync(compiledPath)) {
-                console.error(`Component « ${route.page} » not found`, { url, route, compiledPath })
+            const compiledFilePath = addPaths(config.paths?.compiled, `${route.page}.tpl.mjs`)
+            if (!fsSync.existsSync(compiledFilePath)) {
+                console.error(`Component « ${route.page} » not found`, { url, route, compiledFilePath })
                 response.writeHead(418)
                 return response.end(``)
             }
     
             try { 
-                build(compiledPath, route.args, response)
+                build(compiledFilePath, route.args, response)
             }
             catch (e) {            
                 console.error('\x1b[35m%s\x1b[0m', `BUILD ERROR:\n${e.toString()}`)
@@ -249,7 +246,7 @@ async function server(request, response) {
 
     // Aucune route ne correspond, on renvoie le fichier demandé du dossier public
     const staticPath = app.devMode  ? (process.env.PUBLIC_STATIC || defaultOptions.server.paths.public)
-                                : `${argsWithoutOptions[1]}/${process.env.PUBLIC_DOMAIN}/public`
+                                : `${config.paths.build}/${process.env.PUBLIC_DOMAIN}/public`
     filePath = filePath ? filePath : `${staticPath}${url}`
     const extname = String(Path.extname(filePath)).toLowerCase()
     if (!extname) filePath += '/index.html'
@@ -375,7 +372,10 @@ async function build(compiledFilePath, attributes, response) {
     })
 }
 
-
+const isFile = (path) => {
+    if (path.at(-1) === '/') return false
+    return (path.startsWith('./') ? path.slice(2) : path).lastIndexOf('.') > -1
+}
 
 async function compote(args=[]) {
 
@@ -491,9 +491,15 @@ Developement:
         process.exit(1)
     }
 
+
+
     // Auto-compilation
     if (options.includes('--watch') || options.includes('--dev')) {
 
+        // Compile l'ensemble des components
+        if (options.includes('--dev') && !options.includes('--bypass-compile')) {
+            await compote([ '--compile', srcPath, compiledPath ])
+        }
 
         // Charge les dépendences
         if (Array.isArray(config.routes)) defaultOptions.server.routes = config.routes
@@ -518,9 +524,9 @@ Developement:
 
         const directories = await directoryTree(srcPath.at(-1) === '/' ? srcPath.slice(0, -1) : srcPath)
         for (const dir of directories) {
-            console.log('watch directory ', dir)
             fsSync.watch(dir, (ev, file) => onchange(dir, ev, file))
         }
+        console.log('watching changes in directories:', directories)
     }
 
 
@@ -560,8 +566,8 @@ Developement:
     && !options.includes('--bypass-build')) {
 
         // Compile l'ensemble des components
-        if (options.includes('--dist')) {
-            await compote([ '--build', srcPath, compiledPath ])
+        if (options.includes('--dist') && !options.includes('--bypass-compile')) {
+            await compote([ '--compile', srcPath, compiledPath ])
         }
 
 
@@ -586,7 +592,7 @@ Developement:
             state.allComponents[Component.name] = Component
             const routes = await Component.routes()
             state.components = await Compote.loadDependencies(Component, state.allComponents, true, compiledFullPath)
-            const prefix = `${out}/${env.PUBLIC_DOMAIN}/public/`
+            const prefix = `${buildPath}/${env.PUBLIC_DOMAIN}/public/`
             await fs.mkdir(prefix, { recursive: true })
             console.log(`${page} ${routes.length}x... => ${prefix}`)
 
@@ -643,7 +649,7 @@ Developement:
     
     // Fichier source => out
     const doCompile = options.includes('--compile') || options.includes('--watch')
-    const srcFolder = srcPath && (srcPath.at(-1) === '/' || srcPath.indexOf('.') === -1)
+    const srcFolder = srcPath && !isFile(srcPath)
     
     
     // Compilation d'un dossier
@@ -662,7 +668,7 @@ Developement:
     // Compilation d'un composant explicite
     if (doCompile && !srcFolder) {
 
-        if (compiledPath.indexOf('.') > -1) {
+        if (isFile(compiledPath)) {
             console.error(`compiled path need to be a directory`, { srcPath, compiledPath })
             process.exit(1)
         }
