@@ -45,7 +45,7 @@ const defaultOptions = {
     server: {
         port: process.env.PORT ?? 8080,
         paths: {
-            cache: './cache',
+            cache: './.compote/cache',
             public: './public',
         },
         routes: [],
@@ -124,9 +124,16 @@ const version = () => {
 
 const configFile = () => {
     if (Object.keys(config).length) return
+    let content = null
+    try {
+        content = fsSync.readFileSync(new URL(`${cwd}/compote.json`, import.meta.url), { encoding: 'utf-8'})
+    }
+    catch (e) { return false }
+    
+    if (content === null) return
+        
 
     try {
-        const content = fsSync.readFileSync(new URL(`${cwd}/compote.json`, import.meta.url), { encoding: 'utf-8'})
         const conf = JSON.parse(content)
         if (conf) Object.assign(config, conf)
         for (const r of conf.routes) {
@@ -134,7 +141,7 @@ const configFile = () => {
         }
     }
     catch (e) {
-        console.error(`compote.json format invalid`, e)
+        console.error(`compote.json format invalid`)
     }
     return
 }
@@ -246,7 +253,7 @@ async function server(request, response) {
 
     // Aucune route ne correspond, on renvoie le fichier demandé du dossier public
     const staticPath = app.devMode  ? (process.env.PUBLIC_STATIC || defaultOptions.server.paths.public)
-                                : `${config.paths.build}/${process.env.PUBLIC_DOMAIN}/public`
+                                : `${config.paths.dist}/${process.env.PUBLIC_DOMAIN}/public`
     filePath = filePath ? filePath : `${staticPath}${url}`
     const extname = String(Path.extname(filePath)).toLowerCase()
     if (!extname) filePath += '/index.html'
@@ -377,6 +384,58 @@ const isFile = (path) => {
     return (path.startsWith('./') ? path.slice(2) : path).lastIndexOf('.') > -1
 }
 
+async function initProject() {
+    console.log('\nInitialize your project...\n')
+    const configFile = 'compote.json'
+    const exists = await fs.stat(configFile)
+        .catch((e) => false)
+    if (exists) {
+        console.error(`a compote.json file already exists!`)
+        process.exit(1)
+    }
+
+    const defaultConfig = {
+        "paths": {
+            "src": "./src/components",
+            "compiled": "./compote/compiled",
+            "dist": "./dist"	
+        },
+        "server": {
+            "paths": {
+                "public": "./public",
+                "cache": "./compote/cache"
+            }
+        },
+        "routes": [
+            { "match": "^index\\.html$", "page": "HomePage" },
+            { "match": 404, "page": "NotFoundPage", "args": [ "path", "query" ] }
+        ]        
+    }
+    const defaultConfigString = JSON.stringify(defaultConfig, undefined, "\t")
+    const paths = Object.assign(defaultConfig.paths, defaultConfig.server.paths)
+    for (const p in paths) {
+        console.log(`create directory ${p} => ${paths[p]}`)
+        await fs.mkdir(paths[p], { recursive: true })
+    }
+
+    const ignore = [
+        '.compose/',
+        'dist/',
+    ]
+    console.log(`\nIgnore theses files in your distributed version control (eg: gitignore) file:\n${ignore.join("\n")}`)
+
+    console.log(`\n\nCreating compose.json config file...`)
+    await fs.writeFile(configFile, defaultConfigString, { encoding: 'utf-8' })
+        .catch(e => console.error(`can't write ${configFile} file`))
+
+    console.log(`-------------------------------------------------------`)
+    console.dir(defaultConfig, { depth: Infinity })
+    console.log(`-------------------------------------------------------`)
+    console.log(`\n\n Start by running: npx compote --dev    ( Details: npx compote --help )`)
+
+    process.exit(0)
+}
+
 async function compote(args=[]) {
 
     const startTime = new Date()
@@ -399,23 +458,28 @@ async function compote(args=[]) {
     for (const k in routes) delete routes[k]
     forStack.length = 0
     
-    let srcPath, compiledPath, buildPath, json
+    let srcPath, compiledPath, distPath, json
     let required = {}
     let errorMessage 
 
+    if (options.includes('--init')) {
+        return await initProject()
+    }
+
+
     if (options.includes('--dist')) {
-        [ srcPath, compiledPath, buildPath ] = argsWithoutOptions
-        required = { srcPath, compiledPath, buildPath }
+        [ srcPath, compiledPath, distPath ] = argsWithoutOptions
+        required = { srcPath, compiledPath, distPath }
         errorMessage = `missing path parameter\nnpx compote --dist <src path> <compiled path> <build path>`
     }
     else if (options.includes('--build')) {
-        [ compiledPath, buildPath, json ] = argsWithoutOptions       
-        required = { compiledPath, buildPath }
+        [ compiledPath, distPath, json ] = argsWithoutOptions       
+        required = { compiledPath, distPath }
         errorMessage = `missing path parameter\nnpx compote --build <compiled path> <build path> [json]`
     } 
     else if (options.includes('--build-pages')) {
-        [ compiledPath, buildPath ] = argsWithoutOptions
-        required = { compiledPath, buildPath }
+        [ compiledPath, distPath ] = argsWithoutOptions
+        required = { compiledPath, distPath }
         errorMessage = `missing path parameter\nnpx compote --build-pages <compiled path> <build path>`
     }
     else if (options.includes('--compile') || options.includes('--watch')) {
@@ -431,14 +495,14 @@ async function compote(args=[]) {
 
     if (('srcPath' in required && !required.srcPath)
     || ('compiledPath' in required && !required.compiledPath)
-    || ('buildPath' in required && !required.buildPath)) {
+    || ('distPath' in required && !required.distPath)) {
         if (config.paths.src) srcPath = config.paths.src
         if (config.paths.compiled) compiledPath = config.paths.compiled
-        if (config.paths.build) buildPath = config.paths.build
+        if (config.paths.dist) distPath = config.paths.dist
     
         if (('srcPath' in required && !srcPath)
         || ('compiledPath' in required && !compiledPath)
-        || ('buildPath' in required && !buildPath)) {
+        || ('distPath' in required && !distPath)) {
             console.error(errorMessage, Object.values(required))
             process.exit(1)
         }
@@ -517,8 +581,8 @@ Developement:
             clearTimeout(dedup[filepath])
             dedup[filepath] = setTimeout(() => { 
                 console.log(`\ncomponent ${name}${ext} ${eventType}`)
-                const outfile = addPaths(compiledPath, `${name}.tpl.mjs`)
-                compote([ '--compile', filepath, outfile ]) //filepath.replace(paths.templates, paths.components).replace('.html', '.tpl.mjs') ])
+                // const outfile = addPaths(compiledPath, `${name}.tpl.mjs`)
+                compote([ '--compile', filepath, compiledPath ]) //filepath.replace(paths.templates, paths.components).replace('.html', '.tpl.mjs') ])
             })
         }
 
@@ -542,8 +606,8 @@ Developement:
     // Construction d'un composant compilé à un fichier .html
     if (options.includes('--build')) {
         if (!compiledPath) exit(`Missing compiled component source to build`)
-        if (!buildPath || ['"', "'", '{'].includes(buildPath.at(0))) exit(`Missing HTML file destination to build`)
-        console.log(`construction du composant ${compiledPath} => ${buildPath}`)
+        if (!distPath || ['"', "'", '{'].includes(distPath.at(0))) exit(`Missing HTML file destination to build`)
+        console.log(`construction du composant ${compiledPath} => ${distPath}`)
         let attributes = {}
         try { 
             if (json) attributes = JSON.parse(json) 
@@ -554,7 +618,7 @@ Developement:
         const html = await build(compiledPath, attributes, {
             writeHead: (code, message) => console.dir({code, message}),
             response: (response) => console.log({response}),
-            end: (content, encoding) => fs.writeFile(buildPath, content, { encoding })
+            end: (content, encoding) => fs.writeFile(distPath, content, { encoding })
                                             .catch(e => console.log)
             })
         // console.log(html)
@@ -592,7 +656,7 @@ Developement:
             state.allComponents[Component.name] = Component
             const routes = await Component.routes()
             state.components = await Compote.loadDependencies(Component, state.allComponents, true, compiledFullPath)
-            const prefix = `${buildPath}/${env.PUBLIC_DOMAIN}/public/`
+            const prefix = `${distPath}/${env.PUBLIC_DOMAIN}/public/`
             await fs.mkdir(prefix, { recursive: true })
             console.log(`${page} ${routes.length}x... => ${prefix}`)
 
@@ -669,7 +733,7 @@ Developement:
     if (doCompile && !srcFolder) {
 
         if (isFile(compiledPath)) {
-            console.error(`compiled path need to be a directory`, { srcPath, compiledPath })
+            console.error(`compiled path need to be a directory`, { srcPath, compiledPath, args })
             process.exit(1)
         }
 
