@@ -1,6 +1,8 @@
 #! /usr/bin/env node
 
+import fsSync from 'fs'
 import fs from 'fs/promises'
+
 import { inspect } from 'util'
 import path from 'path'
 import { fileURLToPath } from 'url'
@@ -16,7 +18,7 @@ const app = {
 }
 
 
-let http, https, Path, fsSync, execFileSync
+let http, https, Path
 
 
 let compoteVersion
@@ -48,7 +50,6 @@ const defaultOptions = {
             public: './public',
             compiled: './compiled',
             pages: 'pages',
-            routes: 'compote.routes.mjs',
         },
         routes: [],
     }
@@ -58,6 +59,7 @@ const code = {}
 const dependencies = {}
 const routes = {}
 const forStack = []
+const config = {}
 
 const emptyElements = [ 'img', 'input', 'br', 'meta', 'link', 'source', 'base', 'area', 'wbr', 'hr', 'col', 'embed', 'param', 'track', ]
 
@@ -108,30 +110,31 @@ class Slot {
 }
 
 
-const version = async () => {
+const version = () => {
     if (compoteVersion) return compoteVersion
-    if (!fsSync) fsSync = (await import('fs')).default
 
-    const json = JSON.parse(
-        await fs.readFile(
-          new URL(`${__dirname}/package.json`, import.meta.url)
-        )
-      )
+    const content = fsSync.readFileSync(new URL(`${__dirname}/package.json`, import.meta.url), { encoding: 'utf-8'})
+    let json
+    try {
+        json = JSON.parse(content)
+    }
+    catch (e) {
+        console.error(`can't parse the compote package.json file`)
+    }
     compoteVersion = json?.version ?? '?'
     return compoteVersion
 }
 
-const configFile = async () => {
-    if (defaultOptions.configFile) return
-    if (!fsSync) fsSync = (await import('fs')).default
+const configFile = () => {
+    if (Object.keys(config).length) return
 
     try {
-
-        defaultOptions.configFile = JSON.parse(
-            await fs.readFile(
-                new URL(`${cwd}/compote.json`, import.meta.url)
-            )
-        )
+        const content = fsSync.readFileSync(new URL(`${cwd}/compote.json`, import.meta.url), { encoding: 'utf-8'})
+        const conf = JSON.parse(content)
+        if (conf) Object.assign(config, conf)
+        for (const r of conf.routes) {
+            if (typeof r.match === 'string') r.match = new RegExp(r.match)
+        }
     }
     catch (e) {
         console.error(`compote.json format invalid`, e)
@@ -291,8 +294,7 @@ async function server(request, response) {
 }
 
 const envFile = async (filename) => {
-    const readFile = (await import('fs/promises')).readFile
-    const env = await readFile(filename, { encoding: 'utf-8' })
+    const env = await fs.readFile(filename, { encoding: 'utf-8' })
         .catch(e => exit(`\x1b[31mEnvironment file « ${filename} » not found\x1b[0m`))
     
     const lines = env.trim().split("\n")
@@ -430,11 +432,9 @@ async function compote(args=[]) {
     if (('srcPath' in required && !required.srcPath)
     || ('compiledPath' in required && !required.compiledPath)
     || ('buildPath' in required && !required.buildPath)) {
-        await configFile()
-        const conf = defaultOptions.configFile
-        if (conf.src) srcPath = conf.src
-        if (conf.compiled) compiledPath = conf.compiled
-        if (conf.build) buildPath = conf.build
+        if (config.paths.src) srcPath = config.paths.src
+        if (config.paths.compiled) compiledPath = config.paths.compiled
+        if (config.paths.build) buildPath = config.paths.build
     
         if (('srcPath' in required && !srcPath)
         || ('compiledPath' in required && !compiledPath)
@@ -447,7 +447,7 @@ async function compote(args=[]) {
 
     if (!args.length || options.includes('--help')) {
 
-        await version()
+        version()
         console.log(`
 
 COMPOTE version ${compoteVersion}
@@ -496,17 +496,10 @@ Developement:
 
 
         // Charge les dépendences
-        const routesFile = defaultOptions.server.paths.routes
-        const exists = await fs.stat(`${cwd}/${routesFile}`)
-            .catch(e => console.warn(`\x1b[34mRoutes file ${routesFile} not found, switch to auto-detect mode\x1b[0m `))
-        if (exists) {
-            const routes = (await import(`${cwd}/${routesFile}`)).default
-            if (routes) defaultOptions.server.routes = routes
-            else console.error(`Error inside your routes configuration ${routesFile}`)
-        }
+        if (Array.isArray(config.routes)) defaultOptions.server.routes = config.routes
+        else console.warn(`\x1b[34mRoutes file ${routesFile} not found, switch to auto-detect mode\x1b[0m `)
 
         const dedup = {}
-        fsSync = (await import('fs')).default
 
         const onchange = (dir, eventType, file) => {
             if (eventType !== 'change') return
@@ -633,13 +626,11 @@ Developement:
         if (options.includes('--dev')) app.devMode = true
         if (process.env.DEV_PORT) defaultOptions.server.port = process.env.DEV_PORT
         if (process.env.PUBLIC_NAME) defaultOptions.server.paths.cache += `/${process.env.PUBLIC_NAME}`
-        if (!fsSync) fsSync = (await import('fs')).default
         fsSync.mkdir(defaultOptions.server.paths.cache, { recursive: true }, (e) => e ? console.error(e) : null)
 
         http = (await import('http')).default
         https = (await import('https')).default
         Path = (await import('path')).default
-        // execFileSync = (await import('child_process')).execFileSync
 
         // Créé un serveur web n attente de connexion
 
@@ -779,7 +770,6 @@ Developement:
         const outputPath = outputFile.slice(0, outputFile.lastIndexOf('/'))
 
         // Vérifie l'existence ou crée le chemin de destination
-        if (!fsSync) fsSync = (await import('fs')).default
         if (!(await fsSync.existsSync(outputPath))) {
             console.log(`create path ${outputPath}`)
             await fs.mkdir(outputPath, { recursive: true })
@@ -1766,5 +1756,5 @@ function mergeObjects(set, defaults) {
 }
 
 
-
+configFile()
 compote(process.argv.slice(2))
