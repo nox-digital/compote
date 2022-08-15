@@ -6,6 +6,8 @@ import fs from 'fs/promises'
 import { inspect } from 'util'
 import path from 'path'
 import { fileURLToPath } from 'url'
+import { exec, spawn } from 'child_process'
+
 
 const customInspectSymbol = Symbol.for('nodejs.util.inspect.custom')
 const __filename = fileURLToPath(import.meta.url)
@@ -252,9 +254,9 @@ async function server(request, response) {
 
 
     // Aucune route ne correspond, on renvoie le fichier demandé du dossier public
-    const staticPath = app.devMode  ? (process.env.PUBLIC_STATIC || defaultOptions.server.paths.public)
-                                : `${config.paths.dist}/${process.env.PUBLIC_DOMAIN}/public`
-    filePath = filePath ? filePath : `${staticPath}${url}`
+    const staticPath = app.devMode  ? (config.server.paths.public || defaultOptions.server.paths.public)
+                                : config.paths.dist
+    filePath = filePath ? filePath : addPaths(staticPath, url)
     const extname = String(Path.extname(filePath)).toLowerCase()
     if (!extname) filePath += '/index.html'
     const mimeTypes = {
@@ -298,6 +300,8 @@ async function server(request, response) {
 }
 
 const envFile = async (filename) => {
+    if (app.env) return
+    app.env = {}
     const env = await fs.readFile(filename, { encoding: 'utf-8' })
         .catch(e => exit(`\x1b[31mEnvironment file « ${filename} » not found\x1b[0m`))
     
@@ -313,6 +317,7 @@ const envFile = async (filename) => {
        const key = line.slice(0, equals).trim()
        const value = line.slice(equals + 1)
        process.env[key] = value
+       app.env[key] = value
     }
 }
 
@@ -322,6 +327,7 @@ const addPaths = (...paths) => {
 
         // Convert next paths starts
         if (all.length) {
+            if (!path) continue
             if (path.startsWith('./')) path = path.slice(2)
             else if (path.at(0) === '/') path = path.slice(1)
         }
@@ -341,10 +347,10 @@ async function build(compiledFilePath, attributes, response) {
 
     const { Worker, MessageChannel, MessagePort, isMainThread, parentPort } = (await import('worker_threads'))
 
-    if (process.env.ENV) {
-        await envFile(process.env.ENV)
-        delete process.env.ENV
-    }
+    // if (process.env.ENV) {
+    //     await envFile(process.env.ENV)
+    //     delete process.env.ENV
+    // }
 
     let compiledFullPath = addPaths(cwd, compiledFilePath)
     const workerCode = `
@@ -399,7 +405,7 @@ async function initProject() {
         "paths": {
             "src": "./src/components",
             "compiled": "./.compote/compiled",
-            "dist": "./dist"	
+            "dist": "./dist"
         },
         "server": {
             "paths": {
@@ -558,163 +564,14 @@ Developement:
 
 
 
-    // Auto-compilation
-    if (options.includes('--watch') || options.includes('--dev')) {
-
-        // Compile l'ensemble des components
-        if (options.includes('--dev') && !options.includes('--bypass-compile')) {
-            await compote([ '--compile', srcPath, compiledPath ])
-        }
-
-        // Charge les dépendences
-        if (Array.isArray(config.routes)) defaultOptions.server.routes = config.routes
-        else console.warn(`\x1b[34mRoutes file ${routesFile} not found, switch to auto-detect mode\x1b[0m `)
-
-        const dedup = {}
-
-        const onchange = (dir, eventType, file) => {
-            if (eventType !== 'change') return
-            const ext = file.slice(file.indexOf('.'))
-            if (!['.html', '.css', '.js', '.mjs'].includes(ext)) return
-
-            const name = file.split('.')[0]
-            const filepath = `${dir}/${name}.html`
-            clearTimeout(dedup[filepath])
-            dedup[filepath] = setTimeout(() => { 
-                console.log(`\ncomponent ${name}${ext} ${eventType}`)
-                // const outfile = addPaths(compiledPath, `${name}.tpl.mjs`)
-                compote([ '--compile', filepath, compiledPath ]) //filepath.replace(paths.templates, paths.components).replace('.html', '.tpl.mjs') ])
-            })
-        }
-
-        const directories = await directoryTree(srcPath.at(-1) === '/' ? srcPath.slice(0, -1) : srcPath)
-        for (const dir of directories) {
-            fsSync.watch(dir, (ev, file) => onchange(dir, ev, file))
-        }
-        console.log('watching changes in directories:', directories)
-    }
+    // ==================================================================
+    //  1 - COMPILATION
+    // ==================================================================
 
 
-    // Build environment
-    if (options.includes('--build') 
-        || options.includes('--build-pages')
-        || options.includes('--dist')
-        || options.includes('--dev')) {
-            await envFile('.env')
-    }
-
-
-    // Construction d'un composant compilé à un fichier .html
-    if (options.includes('--build')) {
-        if (!compiledPath) exit(`Missing compiled component source to build`)
-        if (!distPath || ['"', "'", '{'].includes(distPath.at(0))) exit(`Missing HTML file destination to build`)
-        console.log(`construction du composant ${compiledPath} => ${distPath}`)
-        let attributes = {}
-        try { 
-            if (json) attributes = JSON.parse(json) 
-        }
-        catch (e) { 
-            exit(`Error when parsing JSON parameters: ${e} « ${json} »`) 
-        }
-        const html = await build(compiledPath, attributes, {
-            writeHead: (code, message) => console.dir({code, message}),
-            response: (response) => console.log({response}),
-            end: (content, encoding) => fs.writeFile(distPath, content, { encoding })
-                                            .catch(e => console.log)
-            })
-        // console.log(html)
-        return
-    }
-
-    // Construction de toutes les pages
-    if ((options.includes('--build-pages') || options.includes('--dist'))
-    && !options.includes('--bypass-build')) {
-
-        // Compile l'ensemble des components
-        if (options.includes('--dist') && !options.includes('--bypass-compile')) {
-            await compote([ '--compile', srcPath, compiledPath ])
-        }
-
-
-
-        // Recherche les composants terminant par « Page.tpl.mjs »
-        const pages = (await fs.readdir(compiledPath))
-            .filter(f => f.indexOf('Page.tpl.mjs') > 0)
-
-        const env = {}
-        Object.keys(process.env).filter(k => k.startsWith('PUBLIC_')).map(k => env[k] = process.env[k])
-        const Compote = (await import(`${__dirname}/Compote.mjs`)).default
-        const state = { env, locale: env.PUBLIC_LANG || 'fr', components: {}, allComponents: {} }
-        
-        const mkdirCreated = []
-        let output = ''
-        let nbCharacters = 0
-        let nbPages = 0
-        let compiledFullPath = addPaths(cwd, compiledPath)
-        if (compiledFullPath.at(-1) === '/') compiledFullPath = compiledFullPath.slice(0, -1)
-        for (const page of pages) {
-            const Component = (await import(`${compiledFullPath}/${page}`)).default
-            state.allComponents[Component.name] = Component
-            const routes = await Component.routes()
-            state.components = await Compote.loadDependencies(Component, state.allComponents, true, compiledFullPath)
-            const prefix = `${distPath}/${env.PUBLIC_DOMAIN}/public/`
-            await fs.mkdir(prefix, { recursive: true })
-            console.log(`${page} ${routes.length}x... => ${prefix}`)
-
-            for (const route of routes) {    
-
-                delete state.page
-
-                let filepath = prefix + route.path.slice(route.path.at(0) === '/' ? 1 : 0)
-                if (filepath.at(-1) !== '/' && filepath.slice(filepath.lastIndexOf('/')).indexOf('.') === -1) {
-                    filepath += '/'
-                }
-                const isFolder = filepath.at(-1) === '/'
-                if (isFolder && !mkdirCreated.includes(filepath)) {
-                    await fs.mkdir(filepath, { recursive: true })
-                    mkdirCreated.push(filepath)
-                }
-                const component = new Component(Compote, state, route.params) //{ state: state, attributes: route.params, props: route.props })
-                output = await Compote.build(state, component, undefined, true)
-                nbCharacters += output.length
-                nbPages++
-                if (options.includes('--progress')) console.log(`${Math.round(output.length / 1024)}KB ${filepath}`)
-                await fs.writeFile(filepath + (isFolder ? 'index.html' : ''), output)
-
-            }
-        }
-
-        const deltaTime = new Date() - startTime
-        console.log(`\nwrited ${nbPages} files (${Math.round(nbCharacters/1024)}k characters) in ${deltaTime / 1000}s`)
-    
-
-    }
-
-    // Serveur web
-    if (options.includes('--dev')
-    || options.includes('--build-pages')) {
-
-        if (options.includes('--dev')) app.devMode = true
-        if (process.env.DEV_PORT) defaultOptions.server.port = process.env.DEV_PORT
-        if (process.env.PUBLIC_NAME) defaultOptions.server.paths.cache += `/${process.env.PUBLIC_NAME}`
-        fsSync.mkdir(defaultOptions.server.paths.cache, { recursive: true }, (e) => e ? console.error(e) : null)
-
-        http = (await import('http')).default
-        https = (await import('https')).default
-        Path = (await import('path')).default
-
-        // Créé un serveur web n attente de connexion
-
-        http.createServer(server).listen(defaultOptions.server.port)
-        console.log(`\n${app.devMode ? 'Development' : 'Static'} server listening at http://localhost:${defaultOptions.server.port}/\n`);
-        return
-    }
-
-
-    
     // Fichier source => out
     const doCompile = options.includes('--compile') || options.includes('--watch')
-    const srcFolder = srcPath && !isFile(srcPath)
+    const srcFolder = doCompile && srcPath && !isFile(srcPath)
     
     
     // Compilation d'un dossier
@@ -851,6 +708,187 @@ Developement:
             .catch(e => exit(`can't write the file ${outputFile} !`, e))
 
     }
+
+
+
+    // ==================================================================
+    //  2 - BUILD
+    // ==================================================================
+
+    // Construction d'un composant compilé à un fichier .html
+    if (options.includes('--build')) {
+        if (!compiledPath) exit(`Missing compiled component source to build`)
+        if (!distPath || ['"', "'", '{'].includes(distPath.at(0))) exit(`Missing HTML file destination to build`)
+        console.log(`construction du composant ${compiledPath} => ${distPath}`)
+        let attributes = {}
+        try { 
+            if (json) attributes = JSON.parse(json) 
+        }
+        catch (e) { 
+            exit(`Error when parsing JSON parameters: ${e} « ${json} »`) 
+        }
+        const html = await build(compiledPath, attributes, {
+            writeHead: (code, message) => console.dir({code, message}),
+            response: (response) => console.log({response}),
+            end: (content, encoding) => fs.writeFile(distPath, content, { encoding })
+                                            .catch(e => console.log)
+            })
+        // console.log(html)
+        return
+    }
+
+    // Construction de toutes les pages
+    if ((options.includes('--build-pages') || options.includes('--dist'))
+    && !options.includes('--bypass-build')) {
+
+        // Compile l'ensemble des components
+        if (options.includes('--dist') && !options.includes('--bypass-compile')) {
+            await compote([ '--compile', srcPath, compiledPath ])
+        }
+
+
+        // Recherche les composants terminant par « Page.tpl.mjs »
+        const pages = (await fs.readdir(compiledPath))
+            .filter(f => f.indexOf('Page.tpl.mjs') > 0)
+
+        const env = {}
+        Object.keys(process.env).filter(k => k.startsWith('PUBLIC_')).map(k => env[k] = process.env[k])
+        const Compote = (await import(`${__dirname}/Compote.mjs`)).default
+        const state = { env, locale: env.PUBLIC_LANG || 'fr', components: {}, allComponents: {} }
+        
+        const mkdirCreated = []
+        let output = ''
+        let nbCharacters = 0
+        let nbPages = 0
+        let compiledFullPath = addPaths(cwd, compiledPath)
+        await fs.mkdir(distPath, { recursive: true })
+        const prefix = addPaths(distPath, env.PUBLIC_DOMAIN)
+        let copyTime = 0
+
+        // Copy or move public/ folder
+        if (options.includes('--dist')) {
+            const startCopy = new Date()
+
+            let moved = false
+            const publicPath = config.server.paths.public
+            if (options.includes('--mv-public')) {
+                const exists = await fs.stat(prefix).catch((e) => false)
+                console.log({ exists, prefix })
+                if (!exists) {                    
+                    console.log('moving public folder', { from: publicPath, to: prefix })
+                    moved = true
+                    await fs.rename(publicPath, prefix).catch(e => { 
+                        moved = false 
+                        console.error(`can't move the public folder ${publicPath} to ${prefix}`, e)
+                        process.exit(1)
+                    })
+                }
+            }
+
+            if (!moved) {
+                await fs.mkdir(prefix, { recursive: true })
+                console.log('copying public folder')
+                copy(publicPath, prefix)
+            }
+            copyTime = new Date() - startTime
+            console.log(`\nfiles copied in ${copyTime / 1000}s`)    
+        }
+        else await fs.mkdir(prefix, { recursive: true })
+
+        for (const page of pages) {
+            const Component = (await import(`${compiledFullPath}/${page}`)).default
+            state.allComponents[Component.name] = Component
+            const routes = await Component.routes()
+            state.components = await Compote.loadDependencies(Component, state.allComponents, true, compiledFullPath)
+            console.log(`${page} ${routes.length}x... => ${prefix}`)
+
+            for (const route of routes) {    
+
+                delete state.page
+
+                let filepath = addPaths(prefix, route.path)
+                const isDir = route.path.at(-1) === '/' || !isFile(filepath)
+                if (isDir && !mkdirCreated.includes(filepath)) {
+                    await fs.mkdir(filepath, { recursive: true })
+                    mkdirCreated.push(filepath)
+                }
+                const component = new Component(Compote, state, route.params) //{ state: state, attributes: route.params, props: route.props })
+                output = await Compote.build(state, component, undefined, true)
+                nbCharacters += output.length
+                nbPages++
+                if (options.includes('--progress')) console.log(`${Math.round(output.length / 1024)}KB ${filepath}`)
+                await fs.writeFile(filepath + (isDir ? '/index.html' : ''), output)
+
+            }
+        }
+
+        const deltaTime = new Date() - startTime
+        console.log(`\nwrited ${nbPages} files (${Math.round(nbCharacters/1024)}k characters) in ${(deltaTime - copyTime) / 1000}s (${deltaTime / 1000}s with files copy)`)    
+    }
+
+
+    // ==================================================================
+    //  3 - DEV
+    // ==================================================================
+
+
+    // Auto-compilation
+    if (options.includes('--watch') || options.includes('--dev')) {
+
+        // Compile l'ensemble des components
+        if (options.includes('--dev') && !options.includes('--bypass-compile')) {
+            await compote([ '--compile', srcPath, compiledPath ])
+        }
+
+        // Charge les dépendences
+        if (Array.isArray(config.routes)) defaultOptions.server.routes = config.routes
+        else console.warn(`\x1b[34mRoutes file ${routesFile} not found, switch to auto-detect mode\x1b[0m `)
+
+        const dedup = {}
+
+        const onchange = (dir, eventType, file) => {
+            if (eventType !== 'change') return
+            const ext = file.slice(file.indexOf('.'))
+            if (!['.html', '.css', '.js', '.mjs'].includes(ext)) return
+
+            const name = file.split('.')[0]
+            const filepath = `${dir}/${name}.html`
+            clearTimeout(dedup[filepath])
+            dedup[filepath] = setTimeout(() => { 
+                console.log(`\ncomponent ${name}${ext} ${eventType}`)
+                compote([ '--compile', filepath, compiledPath ])
+            })
+        }
+
+        const directories = await directoryTree(srcPath.at(-1) === '/' ? srcPath.slice(0, -1) : srcPath)
+        for (const dir of directories) {
+            fsSync.watch(dir, (ev, file) => onchange(dir, ev, file))
+        }
+        console.log('watching changes in directories:', directories)
+    }
+
+
+
+    // Serveur web
+    if (options.includes('--dev')
+    || options.includes('--build-pages')) {
+
+        if (options.includes('--dev')) app.devMode = true
+        if (process.env.DEV_PORT) defaultOptions.server.port = process.env.DEV_PORT
+        if (process.env.PUBLIC_NAME) defaultOptions.server.paths.cache += `/${process.env.PUBLIC_NAME}`
+        fsSync.mkdir(defaultOptions.server.paths.cache, { recursive: true }, (e) => e ? console.error(e) : null)
+
+        http = (await import('http')).default
+        https = (await import('https')).default
+        Path = (await import('path')).default
+
+        // Créé un serveur web n attente de connexion
+
+        http.createServer(server).listen(defaultOptions.server.port)
+        console.log(`\n${app.devMode ? 'Development' : 'Static'} server listening at http://localhost:${defaultOptions.server.port}/\n`);
+        return
+    }
+    
 }
 
 
@@ -1826,6 +1864,58 @@ function mergeObjects(set, defaults) {
     return set
 }
 
+/**
+ * serach files and directories recursively.
+ *  Option: you can limit search path depth.
+ * @param {string} targetpath search base path
+ * @param {number} depth recursive depth. default = no depth limit
+ * @returns list of { path:absolute path, isDir:is directory } of files and dirs in targetpath
+ */
+ var directoryList = ((targetpath, depth = -1) => {
+    let result = [];
+    let dirs = fsSync.readdirSync(targetpath);
+    dirs.forEach(file => {
+        let filepath = targetpath + "/" + file;
+        let isDir = fsSync.lstatSync(filepath).isDirectory();
+        result.push({path:filepath, isDir:isDir });
+        if ( isDir ) {
+            if ( depth == 0 ) return result;
+            result = result.concat( directoryList(filepath, depth - 1));
+        }
+    });
+    return result;
+});
+
+/**
+ * Recursively copies folders and files under the specified path with the same structure.
+ * If the destination directory does not exist, a folder will be created and copied into it.
+ * In case of insufficient permissions or insufficient capacity, it will detect an exception and stop.
+ * @param {string} srcpath copy from the path
+ * @param {string} destpath copy to the path
+ */
+var copy = ((srcpath, destpath) => {
+    if ( !fsSync.existsSync(destpath) ) {
+        fsSync.mkdirSync(destpath,{ recursive: true } );
+    }
+    let targetList = directoryList( srcpath )
+    console.log(`copying ${targetList.length} files...`)
+    const paths = {}
+    for (const n of targetList) {
+        if (n.isDir) paths[n.path.slice(srcpath.length)] = 1
+    }
+    for (const dir in paths) {
+        const destDir = `${destpath}${dir}`
+        fsSync.mkdirSync(destDir, { recursive: true } )
+    }
+
+    targetList.forEach( node => {
+        let newpath = destpath + node.path.substring(srcpath.length);
+        if ( !node.isDir) {
+            fsSync.copyFile(node.path, newpath, err => {if (err) throw err});
+        }
+    });
+});
 
 configFile()
+envFile('.env')
 compote(process.argv.slice(2))
