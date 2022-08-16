@@ -126,6 +126,39 @@ const version = () => {
     return compoteVersion
 }
 
+const envValueInterpolation = (str, name) => {
+
+    const chunks = []
+
+    for (let i=0; i < str.length; i++) {
+        const opener = str.indexOf('{', i)
+        let until = opener === -1 ? undefined : opener
+        const before = str.slice(i, until)
+        if (before.length) chunks.push(before)
+        if (until === undefined) break
+
+        i = until
+        const closer = str.indexOf('}', i)
+        until = closer === -1 ? undefined : closer
+        if (until === undefined) {
+            chunks.push('{')
+            continue
+        }
+
+        const key = str.slice(opener + 1, closer)
+        if (key in process.env) {
+            chunks.push(`${process.env[key]}`)
+            i = closer + 1
+            continue
+        }
+            
+        console.error(`missing environment variable « ${key} » to construct the « ${name} » value « ${str} »`)
+        process.exit(1)
+    }
+
+    return chunks.join('')
+}
+
 const configFile = () => {
     Object.assign(config, defaultOptions)
 
@@ -144,17 +177,10 @@ const configFile = () => {
 
         if ('paths' in conf) {
             for (const p in conf.paths) {
-                const v = conf.paths[p]
-                if (v.at(0) === '$') {
-                    const k = v.slice(1)
-                    if (k in process.env) conf.paths[p] = process.env[k]
-                    else {
-                        console.error(`missing environment variable « ${k} » to construct ${p} path value`)
-                        process.exit(1)
-                    }
-                }
+                conf.paths[p] = envValueInterpolation(conf.paths[p], p)
             }
             config.paths = conf.paths
+            console.log(config.paths)
         }
 
         if ('routes' in conf) {
@@ -912,7 +938,6 @@ Developement:
 
         if (options.includes('--dev')) app.devMode = true
         if (process.env.DEV_PORT) config.server.port = process.env.DEV_PORT
-        if (process.env.PUBLIC_NAME) config.paths.cache += `/${process.env.PUBLIC_NAME}`
         fsSync.mkdir(config.paths.cache, { recursive: true }, (e) => e ? console.error(e) : null)
 
         http = (await import('http')).default
