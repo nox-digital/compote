@@ -37,21 +37,23 @@ const defaultOptions = {
         // Injection du slot
         slot:       '…',                // <MonComposant>le slot ici {…MonComposant}</MonComposant>
     },
-    encode: {
-        auto: true,
-    },
-    attributes: {
-        addMissingQuotes: "'",
-    },
-    noGap: true,
-    server: {
-        port: process.env.PORT ?? 8080,
-        paths: {
-            cache: './.compote/cache',
-            public: './public',
+    behavior: {
+        encode: {
+            auto: true,
         },
-        routes: [],
-    }
+        attributes: {
+            addMissingQuotes: "'",
+        },
+        noGap: true,    
+    },
+    paths: {
+        cache: './.compote/cache',
+        public: './public',
+    },
+    server: {
+        port: 8080,
+    },
+    routes: [],
 }
 const compiled = {}
 const code = {}
@@ -125,26 +127,59 @@ const version = () => {
 }
 
 const configFile = () => {
-    if (Object.keys(config).length) return
+    Object.assign(config, defaultOptions)
+
     let content = null
     try {
         content = fsSync.readFileSync(new URL(`${cwd}/compote.json`, import.meta.url), { encoding: 'utf-8'})
     }
-    catch (e) { return false }
+    catch (e) { 
+        return false 
+    }
     
     if (content === null) return
         
-
     try {
         const conf = JSON.parse(content)
-        if (conf) Object.assign(config, conf)
-        for (const r of conf.routes) {
-            if (typeof r.match === 'string') r.match = new RegExp(r.match)
+
+        if ('paths' in conf) {
+            for (const p in conf.paths) {
+                const v = conf.paths[p]
+                if (v.at(0) === '$') {
+                    const k = v.slice(1)
+                    if (k in process.env) conf.paths[p] = process.env[k]
+                    else {
+                        console.error(`missing environment variable « ${k} » to construct ${p} path value`)
+                        process.exit(1)
+                    }
+                }
+            }
+            config.paths = conf.paths
         }
+
+        if ('routes' in conf) {
+            for (const r of conf.routes) {
+                if (typeof r.match === 'string') r.match = new RegExp(r.match)
+            }
+            config.routes = conf.routes
+        }
+
+        if ('syntax' in conf) {
+            config.syntax = conf.syntax
+        }
+
+        if ('behavior' in conf) {
+            config.behavior = conf.behavior
+        }
+
     }
     catch (e) {
         console.error(`compote.json format invalid`)
+        return
     }
+
+
+
     return
 }
 
@@ -176,7 +211,7 @@ const router = (url) => {
     const u = splitURL(url)
     const args = {}
 
-    for (const r of defaultOptions.server.routes) {
+    for (const r of config.routes) {
         if (Number.isInteger(r.match)) continue
         const match = u.path.match(r.match)
         if (!match) continue
@@ -226,14 +261,14 @@ async function server(request, response) {
     
         const route = router(url)
         if (route.rewrited) {
-            filePath = `${defaultOptions.server.paths.cache}/${route.path}`
+            filePath = `${config.paths.cache}/${route.path}`
 
             // S'il n'existe pas encore en cache
             if (!route.cache || !fsSync.existsSync(filePath)) {
 
                 console.log('DOWNLOAD', filePath)
                 // Créé les répertoires intérmédiaires
-                await fs.mkdir(`${defaultOptions.server.paths.cache}/${route.paths.join('/')}`, { recursive: true })
+                await fs.mkdir(`${config.paths.cache}/${route.paths.join('/')}`, { recursive: true })
 
                 // Télécharge le fichier
             const file = fsSync.createWriteStream(filePath)
@@ -254,8 +289,7 @@ async function server(request, response) {
 
 
     // Aucune route ne correspond, on renvoie le fichier demandé du dossier public
-    const staticPath = app.devMode  ? (config.server.paths.public || defaultOptions.server.paths.public)
-                                : config.paths.dist
+    const staticPath = app.devMode  ? config.paths.public : config.paths.dist
     filePath = filePath ? filePath : addPaths(staticPath, url)
     const extname = String(Path.extname(filePath)).toLowerCase()
     if (!extname) filePath += '/index.html'
@@ -282,7 +316,7 @@ async function server(request, response) {
         if (error) {
             if (error.code == 'ENOENT') {
                 response.writeHead(404);
-                const custom404 = defaultOptions.server.routes.find(r => r.match === 404)
+                const custom404 = config.routes.find(r => r.match === 404)
                 if (!custom404) return response.end(`Page Not Found\n`);
                 if (ssr) return ssr(custom404)
             }
@@ -405,24 +439,22 @@ async function initProject() {
         "paths": {
             "src": "./src/components",
             "compiled": "./.compote/compiled",
-            "dist": "./dist"
+            "public": "./public",
+            "dist": "./dist",
+            "cache": "./.compote/cache"
         },
         "server": {
-            "paths": {
-                "public": "./public",
-                "cache": "./.compote/cache"
-            }
+            "port": 8080,
         },
         "routes": [
             { "match": "^index\\.html$", "page": "HomePage" },
             { "match": 404, "page": "NotFoundPage", "args": [ "path", "query" ] }
         ]        
     }
-    const defaultConfigString = JSON.stringify(defaultConfig, undefined, "\t")
-    const paths = Object.assign(defaultConfig.paths, defaultConfig.server.paths)
-    for (const p in paths) {
-        console.log(`create directory ${p} => ${paths[p]}`)
-        await fs.mkdir(paths[p], { recursive: true })
+    const defaultConfigString = JSON.stringify(defaultConfig, null, 2)
+    for (const p in defaultConfig.paths) {
+        console.log(`create directory ${p} => ${defaultConfig.paths[p]}`)
+        await fs.mkdir(defaultConfig.paths[p], { recursive: true })
     }
 
     const ignore = [
@@ -770,8 +802,8 @@ Developement:
             const startCopy = new Date()
 
             let moved = false
-            const publicPath = config.server.paths.public
-            if (options.includes('--mv-public')) {
+            const publicPath = config.paths.public
+            if (options.includes('--mv-public') && options.includes('--dist')) {
                 const exists = await fs.stat(prefix).catch((e) => false)
                 console.log({ exists, prefix })
                 if (!exists) {                    
@@ -841,7 +873,7 @@ Developement:
         }
 
         // Charge les dépendences
-        if (Array.isArray(config.routes)) defaultOptions.server.routes = config.routes
+        if (Array.isArray(config.routes)) config.routes = config.routes
         else console.warn(`\x1b[34mRoutes file ${routesFile} not found, switch to auto-detect mode\x1b[0m `)
 
         const dedup = {}
@@ -874,9 +906,9 @@ Developement:
     || options.includes('--build-pages')) {
 
         if (options.includes('--dev')) app.devMode = true
-        if (process.env.DEV_PORT) defaultOptions.server.port = process.env.DEV_PORT
-        if (process.env.PUBLIC_NAME) defaultOptions.server.paths.cache += `/${process.env.PUBLIC_NAME}`
-        fsSync.mkdir(defaultOptions.server.paths.cache, { recursive: true }, (e) => e ? console.error(e) : null)
+        if (process.env.DEV_PORT) config.server.port = process.env.DEV_PORT
+        if (process.env.PUBLIC_NAME) config.paths.cache += `/${process.env.PUBLIC_NAME}`
+        fsSync.mkdir(config.paths.cache, { recursive: true }, (e) => e ? console.error(e) : null)
 
         http = (await import('http')).default
         https = (await import('https')).default
@@ -884,8 +916,8 @@ Developement:
 
         // Créé un serveur web n attente de connexion
 
-        http.createServer(server).listen(defaultOptions.server.port)
-        console.log(`\n${app.devMode ? 'Development' : 'Static'} server listening at http://localhost:${defaultOptions.server.port}/\n`);
+        http.createServer(server).listen(config.server.port)
+        console.log(`\n${app.devMode ? 'Development' : 'Static'} server listening at http://localhost:${config.server.port}/\n`);
         return
     }
     
@@ -1142,7 +1174,6 @@ async function compileLabel(code, className) {
 */
 async function compileTemplate(start, stop, depth=0, parentTag='') {
 
-    const syntax = defaultOptions.syntax
     const searches = {
 
         comment: {
@@ -1181,7 +1212,7 @@ async function compileTemplate(start, stop, depth=0, parentTag='') {
         },
     
         expression: {
-            _: syntax.opener,
+            _: config.syntax.opener,
 
             if: {
                 _: 'if ',
@@ -1211,8 +1242,8 @@ async function compileTemplate(start, stop, depth=0, parentTag='') {
         },
 
         bypass: {
-            _: `${syntax.opener}${syntax.bypass}`,
-            closer: syntax.closer,
+            _: `${config.syntax.opener}${config.syntax.bypass}`,
+            closer: config.syntax.closer,
         },
     
     }
@@ -1238,7 +1269,7 @@ async function compileTemplate(start, stop, depth=0, parentTag='') {
 
         if (n._1st._ === -1) {
             const untilStop = slice(start, stop)
-            if (defaultOptions.noGap && untilStop.replaceAll("\n", '').trim()) {
+            if (config.behavior.noGap && untilStop.replaceAll("\n", '').trim()) {
                 push(untilStop)
             }
             break
@@ -1246,7 +1277,7 @@ async function compileTemplate(start, stop, depth=0, parentTag='') {
 
         // Partie précédent une nouvelle interaction
         const untilInteraction = slice(start, n._1st._)
-        if (defaultOptions.noGap && untilInteraction.replaceAll("\n", '').trim()) {
+        if (config.behavior.noGap && untilInteraction.replaceAll("\n", '').trim()) {
             push(untilInteraction)
         }
 
@@ -1313,7 +1344,7 @@ async function compileTemplate(start, stop, depth=0, parentTag='') {
 
             case 'bypass':
                 n.expression.operator = n.expression._1st
-                push(defaultOptions.syntax.opener)
+                push(config.behavior.syntax.opener)
                 start = n.expression.bypass.$
                 continue
 
@@ -1369,12 +1400,12 @@ async function compileTemplate(start, stop, depth=0, parentTag='') {
                             start = n.expression._ + 1
                             continue
                         }
-                        const isSlot = code.template.startsWith(syntax.slot, n.expression.$)
+                        const isSlot = code.template.startsWith(config.syntax.slot, n.expression.$)
 
-                        const unprotected = isSlot || code.template.startsWith(syntax.unprotected, n.expression.$)
-                        const encode = unprotected ? false : defaultOptions.encode.auto
+                        const unprotected = isSlot || code.template.startsWith(config.syntax.unprotected, n.expression.$)
+                        const encode = unprotected ? false : config.behavior.encode.auto
 
-                        const x = slice(unprotected ? n.expression.$ + syntax.unprotected.length : n.expression.$ , n.expression.closer._)
+                        const x = slice(unprotected ? n.expression.$ + config.syntax.unprotected.length : n.expression.$ , n.expression.closer._)
                         
                         toPush = isSlot ? [{s: new Slot(x) }] : [{x: new Expression(x) }]
                         push(encode ? [{e: '>'}, toPush] : toPush)
@@ -1448,7 +1479,7 @@ async function attributesAndConditions(start, stop, closer, type) {
 
         if (Array.isArray(aa) && aa[0] instanceof Object && 'e' in aa[0]) {
             let previousCharacter = code.template[from._ - 1]
-            if (previousCharacter === '=') previousCharacter = defaultOptions.attributes.addMissingQuotes
+            if (previousCharacter === '=') previousCharacter = config.behavior.attributes.addMissingQuotes
             attributes[attribute][0].e = previousCharacter
         }
         return from.end.$
@@ -1788,12 +1819,12 @@ function idxElementName(index, loop) {
 }
 
 function idxExpressionCloser(index, loop, state) {
-    if (loop.c === defaultOptions.syntax.opener) {
+    if (loop.c === config.syntax.opener) {
         if (!('nestedOpener' in state)) state.nestedOpener = 0
         state.nestedOpener++
         return false
     }
-    else if (loop.c === defaultOptions.syntax.closer) {
+    else if (loop.c === config.syntax.closer) {
         if (!('nestedOpener' in state)) state.nestedOpener = 0
         return --state.nestedOpener < 0 ? 1 : false
     }
@@ -1916,6 +1947,10 @@ var copy = ((srcpath, destpath) => {
     });
 });
 
-configFile()
-envFile('.env')
-compote(process.argv.slice(2))
+
+const start = async () => {
+    await envFile('.env')
+    await configFile()
+    compote(process.argv.slice(2))
+}
+start()

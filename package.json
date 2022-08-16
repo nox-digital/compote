@@ -1,6 +1,6 @@
 {
   "name": "@nox-digital/compote",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Single File Component (SFC) to Static Site Generation (SSG). Development in progress, not ready for production.",
   "main": "./compote.js",
   "bin": "./compote.js",
