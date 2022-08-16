@@ -148,7 +148,7 @@ const envValueInterpolation = (str, name) => {
         const key = str.slice(opener + 1, closer)
         if (key in process.env) {
             chunks.push(`${process.env[key]}`)
-            i = closer + 1
+            i = closer
             continue
         }
             
@@ -180,7 +180,6 @@ const configFile = () => {
                 conf.paths[p] = envValueInterpolation(conf.paths[p], p)
             }
             config.paths = conf.paths
-            console.log(config.paths)
         }
 
         if ('routes' in conf) {
