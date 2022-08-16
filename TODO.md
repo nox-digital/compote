@@ -1,2 +1,0 @@
-- add option --test to simply host the dist/ folder 
-- remove --build-pages (use --dist --test)

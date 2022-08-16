@@ -582,8 +582,13 @@ Build:
 Distribution:
 -------------
 
-    Compilation and build all pages
+    Compilation and build all pages 
     npx compote --dist ./src/ ./compiled/ ./build/
+    
+    Options:
+    --test              Launch a static web server to test
+    --mv-public         Move public/ folder rather copying files
+                        To use only in temporary virtual machine
 
 
 Developement:
@@ -794,7 +799,7 @@ Developement:
         let nbPages = 0
         let compiledFullPath = addPaths(cwd, compiledPath)
         await fs.mkdir(distPath, { recursive: true })
-        const prefix = addPaths(distPath, env.PUBLIC_DOMAIN)
+        const prefix = addPaths(distPath)
         let copyTime = 0
 
         // Copy or move public/ folder
@@ -903,7 +908,7 @@ Developement:
 
     // Serveur web
     if (options.includes('--dev')
-    || options.includes('--build-pages')) {
+    || options.includes('--test')) {
 
         if (options.includes('--dev')) app.devMode = true
         if (process.env.DEV_PORT) config.server.port = process.env.DEV_PORT
