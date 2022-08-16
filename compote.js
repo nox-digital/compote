@@ -573,9 +573,15 @@ async function compote(args=[]) {
     }
 
 
-    if (!args.length || options.includes('--help')) {
+    if (!args.length || options.includes('--help') || options.includes('--version')) {
 
         version()
+
+        if (options.includes('--version')) {
+            console.log(`COMPOTE version ${compoteVersion}`)
+            process.exit(0)
+        }
+
         console.log(`
 
 COMPOTE version ${compoteVersion}
