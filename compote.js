@@ -430,8 +430,8 @@ async function build(compiledFilePath, attributes, response) {
             const attributes = JSON.parse(attributesJSON)
             const Compote = (await import('${__dirname}/Compote.mjs')).default
             if (functions) {
-                const customFunctions = (await import(functions))
-                Object.assign(Compote.fn, customFunctions)
+                const fn = (await import(functions))
+                Object.assign(Compote.fn, fn)
             }
             const RequestedComponent = (await import(component)).default
             const {parentPort, workerData} = (await import('worker_threads'))

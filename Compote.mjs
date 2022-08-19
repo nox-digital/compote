@@ -405,7 +405,7 @@ ___________________________________________________
     static fn = {
 
 
-        CDATA: ($, data) => typeof data === 'string' && data.trim() ? `/*<![CDATA[*/\n${data}\n/*]]>*/` : '',
+        // CDATA: (data) => typeof data === 'string' && data.trim() ? `/*<![CDATA[*/\n${data}\n/*]]>*/` : '',
         /*
         styleVars: (state, Component) => Compote.buildStyleVars(state.page[Component.name].styleVars),
         scriptVars: (state, Component) => {
@@ -435,8 +435,13 @@ ___________________________________________________
         if (!(name in state.page)) state.page[name] = {}
         if (!('styleVars' in state.page[name])) state.page[name].styleVars = {}
         if (!('scriptVars' in state.page[name])) state.page[name].scriptVars = {}        
-        for (const f in Compote.fn) state[f] = (...args) => Compote.fn[f]({ env: state.env, instance }, ...args)
-
+        for (const f in Compote.fn) {
+            if (f === 'env') continue
+            state[f] = (...args) => Compote.fn[f](...args)
+        }
+        if ('env' in Compote.fn) {
+            for (const e in Compote.fn.env) Compote.fn.env[e] = state.env[e]
+        }
 
 
         // Vérifie les attributs
@@ -478,6 +483,7 @@ ___________________________________________________
         if (newPage) {
             const styles = []
             const scripts = []
+
             for (const name in state.components) {
 
                 if (!(name in state.page)) continue
@@ -493,8 +499,8 @@ ___________________________________________________
             }
             html = html.replace('<style id="compote-style"></style>', styles.join(''))
             html = html.replace('<script id="compote-script"></script>', scripts.join(''))
+            console.log(scripts.join('').slice(0, 900))
         }
-
         return html
     }
 
