@@ -159,7 +159,7 @@ const envValueInterpolation = (str, name) => {
     return chunks.join('')
 }
 
-const configFile = () => {
+const configFile = async () => {
     Object.assign(config, defaultOptions)
 
     let content = null
@@ -172,8 +172,9 @@ const configFile = () => {
     
     if (content === null) return
         
+    let conf = {}
     try {
-        const conf = JSON.parse(content)
+        conf = JSON.parse(content)
 
         if ('paths' in conf) {
             for (const p in conf.paths) {
@@ -197,13 +198,24 @@ const configFile = () => {
             config.behavior = conf.behavior
         }
 
+
     }
     catch (e) {
         console.error(`compote.json format invalid`)
-        return
+        process.exit(1)
     }
 
-
+    // import custom functions
+    if ('functions' in conf) {
+        try {
+            config.customFunctions = (await import(`${cwd}/${conf.functions}`))
+            config.functions = conf.functions
+        }
+        catch (e) {
+            console.error(`can't import your custom functions ${conf.functions}`, e)
+            process.exit(1)
+        }
+    }
 
     return
 }
@@ -414,9 +426,13 @@ async function build(compiledFilePath, attributes, response) {
     let compiledFullPath = addPaths(cwd, compiledFilePath)
     const workerCode = `
         const worker = async () => {
-            const [ , , component, attributesJSON ] = process.argv
+            const [ , , component, attributesJSON, functions ] = process.argv
             const attributes = JSON.parse(attributesJSON)
             const Compote = (await import('${__dirname}/Compote.mjs')).default
+            if (functions) {
+                const customFunctions = (await import(functions))
+                Object.assign(Compote.fn, customFunctions)
+            }
             const RequestedComponent = (await import(component)).default
             const {parentPort, workerData} = (await import('worker_threads'))
 
@@ -432,7 +448,14 @@ async function build(compiledFilePath, attributes, response) {
         }
         worker()
     `
-    const compote = new Worker(workerCode, { eval: true, argv: [ compiledFilePath, JSON.stringify(attributes) ] })
+    const compote = new Worker(workerCode, { 
+        eval: true, 
+        argv: [ 
+            compiledFilePath, 
+            JSON.stringify(attributes), 
+            config.functions,
+        ] 
+    })
     compote.once('message', content => {
         response.writeHead(200, { 'Content-Type': 'text/html' })
         response.end(content, 'utf-8')
@@ -822,6 +845,9 @@ Developement:
         const env = {}
         Object.keys(process.env).filter(k => k.startsWith('PUBLIC_')).map(k => env[k] = process.env[k])
         const Compote = (await import(`${__dirname}/Compote.mjs`)).default
+        if (config.functions) {
+            Object.assign(Compote.fn, config.customFunctions)
+        }
         const state = { env, locale: env.PUBLIC_LANG || 'fr', components: {}, allComponents: {} }
         
         const mkdirCreated = []

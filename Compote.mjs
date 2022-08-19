@@ -403,7 +403,9 @@ ___________________________________________________
 
 
     static fn = {
-        CDATA: (data) => typeof data === 'string' && data.trim() ? `/*<![CDATA[*/\n${data}\n/*]]>*/` : '',
+
+
+        CDATA: ($, data) => typeof data === 'string' && data.trim() ? `/*<![CDATA[*/\n${data}\n/*]]>*/` : '',
         /*
         styleVars: (state, Component) => Compote.buildStyleVars(state.page[Component.name].styleVars),
         scriptVars: (state, Component) => {
@@ -412,33 +414,6 @@ ___________________________________________________
             return Compote.buildScriptVars(state.page[Component.name].scriptVars, scriptLabels)
         },
         */
-
-        price: (_) => {
-            const { $, price } = _
-            return new Intl.NumberFormat($.locale, { style: 'currency', currency: $.env.PUBLIC_CURRENCY, minimumFractionDigits: 2 })
-                .format(price)
-                .replace(',00', '')
-        },
-
-        priceTax: (_) => {
-            const { $, ht, tax, round = false, ceil = false, floor = false } = _
-
-            const p = (ht + (ht / 100 * (tax / 100))) / 100
-            const price = ceil ? Math.ceil(p) : (floor ? Math.floor(p) : (round ? Math.round(p): Number(p).toFixed(2)))
-            return this.fn.price({ $, price })
-        },
-
-        date: (date, _) => {
-            const d = typeof date === 'string' ? new Date(date) : date
-            const { $, time } = _
-            const options = {  }
-            return d.toLocaleDateString($.env.PUBLIC_LOCALE, options)
-        },
-
-        currency: (c) => {
-            if (c === 'EUR') return '€'
-            if (c === 'USD') return '$'
-        }
     }
 
 
@@ -460,7 +435,7 @@ ___________________________________________________
         if (!(name in state.page)) state.page[name] = {}
         if (!('styleVars' in state.page[name])) state.page[name].styleVars = {}
         if (!('scriptVars' in state.page[name])) state.page[name].scriptVars = {}        
-        for (const f in Compote.fn) state[f] = Compote.fn[f]
+        for (const f in Compote.fn) state[f] = (...args) => Compote.fn[f]({ env: state.env, instance }, ...args)
 
 
 
