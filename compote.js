@@ -208,6 +208,7 @@ const configFile = async () => {
     // import custom functions
     if ('functions' in conf) {
         try {
+            console.log(`loading custom function ${conf.functions}`)
             config.customFunctions = (await import(`${cwd}/${conf.functions}`))
             config.functions = conf.functions
         }
@@ -424,6 +425,7 @@ async function build(compiledFilePath, attributes, response) {
     // }
 
     let compiledFullPath = addPaths(cwd, compiledFilePath)
+    
     const workerCode = `
         const worker = async () => {
             const [ , , component, attributesJSON, functions ] = process.argv
@@ -443,19 +445,17 @@ async function build(compiledFilePath, attributes, response) {
             state.components[RequestedComponent.name] = RequestedComponent
             await Compote.loadDependencies(RequestedComponent, state.components, true, '${compiledFullPath}')
             const requestedComponent = new RequestedComponent(Compote, state, attributes)        
-            output = await Compote.build(state, requestedComponent, undefined, true)
+            output = await Compote.build(state, requestedComponent, undefined, true)        
             parentPort.postMessage(output)
         }
         worker()
     `
-    const compote = new Worker(workerCode, { 
-        eval: true, 
-        argv: [ 
+    const argv = [ 
             compiledFilePath, 
             JSON.stringify(attributes), 
-            config.functions,
-        ] 
-    })
+    ]
+    if (config.functions) argv.push(config.functions)
+    const compote = new Worker(workerCode, { eval: true, argv })
     compote.once('message', content => {
         response.writeHead(200, { 'Content-Type': 'text/html' })
         response.end(content, 'utf-8')
@@ -848,6 +848,7 @@ Developement:
         if (config.functions) {
             Object.assign(Compote.fn, config.customFunctions)
         }
+
         const state = { env, locale: env.PUBLIC_LANG || 'fr', components: {}, allComponents: {} }
         
         const mkdirCreated = []
@@ -867,7 +868,6 @@ Developement:
             const publicPath = config.paths.public
             if (options.includes('--mv-public') && options.includes('--dist')) {
                 const exists = await fs.stat(prefix).catch((e) => false)
-                console.log({ exists, prefix })
                 if (!exists) {                    
                     console.log('moving public folder', { from: publicPath, to: prefix })
                     moved = true

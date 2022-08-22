@@ -499,7 +499,6 @@ ___________________________________________________
             }
             html = html.replace('<style id="compote-style"></style>', styles.join(''))
             html = html.replace('<script id="compote-script"></script>', scripts.join(''))
-            console.log(scripts.join('').slice(0, 900))
         }
         return html
     }
