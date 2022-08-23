@@ -93,7 +93,7 @@ class Expression {
                 if (add) vars.push(k)
             }
         }
-        const with$ = (x.indexOf('$.') > -1 || x.indexOf('$[') > -1) ? ', $' : ''
+        const with$ = (x.indexOf('$.') > -1 || x.indexOf('$[') > -1 || x.indexOf('($)') > -1) ? ', $' : ''
         if (!vars.length) return `(_${with$}) => ${x}`
         if (vars.length === 1 && x.startsWith(vars[0])) {
             if (vars[0].length === x.length || ['.', '['].includes(x.at(vars[0].length))) {
@@ -279,7 +279,6 @@ async function server(request, response) {
         ssr = (route) => {
             // Vérifie que le chemin indiqué par la route existe puis l'importe
             const compiledFilePath = addPaths(config.paths?.compiled, `${route.page}.tpl.mjs`)
-            console.log({ compiledFilePath })
             if (!fsSync.existsSync(compiledFilePath)) {
                 console.error(`Component « ${route.page} » not found`, { url, route, compiledFilePath })
                 response.writeHead(418)

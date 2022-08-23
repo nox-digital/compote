@@ -402,19 +402,7 @@ ___________________________________________________
 
 
 
-    static fn = {
-
-
-        // CDATA: (data) => typeof data === 'string' && data.trim() ? `/*<![CDATA[*/\n${data}\n/*]]>*/` : '',
-        /*
-        styleVars: (state, Component) => Compote.buildStyleVars(state.page[Component.name].styleVars),
-        scriptVars: (state, Component) => {
-            const scriptLabels = {}
-            Component.___.scriptLabels?.forEach(l => scriptLabels[l] = Component.___.label[state.locale][l])    
-            return Compote.buildScriptVars(state.page[Component.name].scriptVars, scriptLabels)
-        },
-        */
-    }
+    static fn = {}
 
 
     /**
