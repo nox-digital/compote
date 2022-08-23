@@ -258,7 +258,6 @@ const router = (url) => {
         }
         if (r.args?.length) {
             r.args.map((key, i) => args[key] = match[i + 1])
-            // console.log({ args, r })
         }
         return { ...u, ...r, args }
     }
@@ -280,6 +279,7 @@ async function server(request, response) {
         ssr = (route) => {
             // Vérifie que le chemin indiqué par la route existe puis l'importe
             const compiledFilePath = addPaths(config.paths?.compiled, `${route.page}.tpl.mjs`)
+            console.log({ compiledFilePath })
             if (!fsSync.existsSync(compiledFilePath)) {
                 console.error(`Component « ${route.page} » not found`, { url, route, compiledFilePath })
                 response.writeHead(418)
@@ -535,7 +535,7 @@ async function compote(args=[]) {
     compiled.var = {}
     compiled.data = {}
     compiled.label = {}
-    compiled.setup = { hoist: {} }
+    compiled.setup = {}
     compiled.template = []
     compiled.style = ''
     compiled.script = ''
@@ -723,15 +723,25 @@ Developement:
             .catch(e => exit(`compile data ERROR`, e))
         code.data = null
 
+        if (code.setup) compiled.setup = await compileData(code.setup, 0)
+            .catch(e => exit(`compile data ERROR`, e))
+        code.setup = null
+
         if (code.label) [compiled.label, compiled.scriptLabels] = await compileLabel(code.label, name)
             .catch(e => exit(`compile label ERROR`, e))
-        code.data = null
+        code.label = null
 
         if (code.template) compiled.template = await compileTemplate(0, code.template.length)
             .catch(e => exit(`compile data ERROR`, e))
         code.template = null
         setContext(compiled.template, [])
 
+        // Gestion des routes spécifiques dans <SETUP>
+        if (compiled.setup?.route) {
+            if (!config.routes.find(r => r.self && r.page === name)) {
+                config.routes.push({ self: 1, match: new RegExp(`^${compiled.setup.route.replaceAll('.', '\\.')}$`), page: name })
+            }
+        }
 
         // Gère les chemins d'accès à ses composants
         for (const dep in dependencies) {
@@ -893,13 +903,22 @@ Developement:
             
             const Component = (await import(`${compiledFullPath}/${page}`)).default
             state.allComponents[Component.name] = Component
-            const routes = await Component.routes()
+            const routes = 'routes' in Component ? await Component.routes() : [ 
+                { 
+                    path: Component.___.setup.route,
+                    params: {},
+                }
+            ]
             state.components = await Compote.loadDependencies(Component, state.allComponents, true, compiledFullPath)
             console.log(`${page} ${routes.length}x... => ${prefix}`)
 
             for (const route of routes) {    
 
                 delete state.page
+                if (!route.path) {
+                    console.error(`ERROR: route missing for component ${Component.name}`)
+                    continue
+                }
 
                 let filepath = addPaths(prefix, route.path)
                 const isDir = route.path.at(-1) === '/' || !isFile(filepath)
@@ -989,7 +1008,7 @@ Developement:
 async function sections(path, name, file) {
 
     const tags = {
-        option:     { _: '<OPTION',     closingOpenTag: { _: '>', closer: '</OPTION>' } },
+        setup:      { _: '<SETUP',      closingOpenTag: { _: '>', closer: '</SETUP>' } },
         param:      { _: '<PARAM',      closingOpenTag: { _: '>', closer: '</PARAM>' } },
         var:        { _: '<VAR',        closingOpenTag: { _: '>', closer: '</VAR>' } },
         data:       { _: '<DATA',       closingOpenTag: { _: '>', closer: '</DATA>' } },
@@ -1046,9 +1065,6 @@ async function sections(path, name, file) {
                         else code[tag] = importedFile + code[tag]
                     }                
                 }
-
-                // Hoister pour les script/style
-                if (a === 'hoist') compiled.setup.hoist[tag] = true
                 
             }
         }
