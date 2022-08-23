@@ -890,6 +890,7 @@ Developement:
         else await fs.mkdir(prefix, { recursive: true })
 
         for (const page of pages) {
+            
             const Component = (await import(`${compiledFullPath}/${page}`)).default
             state.allComponents[Component.name] = Component
             const routes = await Component.routes()

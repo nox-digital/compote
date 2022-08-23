@@ -431,6 +431,7 @@ ___________________________________________________
         ___.prepared++
 
         // Prépare le state
+        if (!('build' in state)) state.build = {}
         if (!('page' in state)) state.page = {}
         if (!(name in state.page)) state.page[name] = {}
         if (!('styleVars' in state.page[name])) state.page[name].styleVars = {}
@@ -460,7 +461,7 @@ ___________________________________________________
 
             // Prépare une fois le composant pour toutes les instances
             if ('prepare' in instance.constructor) {
-                await instance.constructor.prepare(state.env)
+                await instance.constructor.prepare(state.env, state.build)
             }
         }
 
