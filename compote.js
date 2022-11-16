@@ -352,10 +352,16 @@ async function server(request, response) {
     fsSync.readFile(filePath, function(error, content) {
         if (error) {
             if (error.code == 'ENOENT') {
-                response.writeHead(404);
-                const custom404 = config.routes.find(r => r.match === 404)
-                if (!custom404) return response.end(`Page Not Found\n`);
-                if (ssr) return ssr(custom404)
+                response.writeHead(404)
+                if (filePath.indexOf('.html') > -1) {
+
+                    const custom404 = config.routes.find(r => r.match === 404)
+                    if (!custom404) return response.end(`Page Not Found\n`)
+                    if (ssr) return ssr(custom404)
+                } 
+                else {
+                    return response.end(`File Not Found\n`)
+                }
             }
             else {
                 response.writeHead(500);
@@ -1037,13 +1043,29 @@ async function sections(path, name, file) {
 
             // Analyse les attributs
             const attributes = file.slice(next[tag].$, next[tag].closingOpenTag._).trim().split(' ')
+            let addListener = ''
             for (const a of attributes) {
 
+                const eq = a.indexOf('=')
+                const name = eq === -1 ? a : a.slice(0, eq)
+                const value = eq === -1 ? undefined : a.slice(eq + 1).replaceAll('"', '').replaceAll("'", '')
+
+                // AddEventListener
+                // ----------------
+                // on=readystatechange  => addEventListener('readystatechange')
+                // on=interactive       => addEventListener('readystatechange') + readystate=interactive
+                // on=DOMContentLoaded  => addEventListener('DOMContentLoaded')
+                // on=complete          => addEventListener('readystatechange') + readystate=complete
+                // on=load              => addEventListener('load')
+                // on=unload            => addEventListener('unload')
+                if (name === 'on') {
+                    addListener = value
+                }
 
                 // Contenu à importer depuis un fichier externe
-                if (a.startsWith('import=')) {
-                    const toImport = `${path}/` + a.slice('import='.length).replaceAll('"', '').replaceAll("'", '')
-
+                if (name === 'import') {
+                    const toImport = `${path}/${value}`
+                     
                     const importedFile = await fs.readFile(toImport, { encoding: 'utf-8' })
                         .catch(e => exit(`can't read the file ${toImport} !`, e))
                         
@@ -1065,6 +1087,15 @@ async function sections(path, name, file) {
                     }                
                 }
                 
+            }
+            if (addListener && code[tag]) {
+                let ev = addListener
+                let condition = ''
+                if (['interactive', 'complete'].includes(addListener)) {
+                    condition = `if (document.readyState !== '${addListener}') return;\n`
+                    ev = 'readystatechange'
+                }
+                code[tag] = `document.addEventListener('${ev}', (_event_) => {\n${condition}${code[tag]}\n});`
             }
         }
         else code[tag] = ''
