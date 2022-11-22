@@ -286,7 +286,7 @@ async function server(request, response) {
             }
     
             try { 
-                build(compiledFilePath, route.args, response)
+                build(compiledFilePath, route.args, response, request)
             }
             catch (e) {            
                 console.error('\x1b[35m%s\x1b[0m', `BUILD ERROR:\n${e.toString()}`)
@@ -420,7 +420,7 @@ const addPaths = (...paths) => {
 }
 
 
-async function build(compiledFilePath, attributes, response) {
+async function build(compiledFilePath, attributes, response, request) {
 
     const { Worker, MessageChannel, MessagePort, isMainThread, parentPort } = (await import('worker_threads'))
 
@@ -446,6 +446,7 @@ async function build(compiledFilePath, attributes, response) {
             const env = {}
             Object.keys(process.env).filter(k => k.startsWith('PUBLIC_')).map(k => env[k] = process.env[k])
             const state = { env, locale: env.PUBLIC_LANG || 'fr', components: {} }
+            state.canonical = "${process.env.PUBLIC_DOMAIN ? `https://${process.env.PUBLIC_DOMAIN}${request.url}` : request.url}"
 
             state.components[RequestedComponent.name] = RequestedComponent
             await Compote.loadDependencies(RequestedComponent, state.components, true, '${compiledFullPath}')
@@ -931,6 +932,9 @@ Developement:
                     await fs.mkdir(filepath, { recursive: true })
                     mkdirCreated.push(filepath)
                 }
+
+                const routePath = route.path === '/index.html' ? '' : route.path
+                state.canonical = process.env.PUBLIC_DOMAIN ? `https://${process.env.PUBLIC_DOMAIN}${routePath}` : routePath
                 const component = new Component(Compote, state, route.params) //{ state: state, attributes: route.params, props: route.props })
                 output = await Compote.build(state, component, undefined, true)
                 nbCharacters += output.length
