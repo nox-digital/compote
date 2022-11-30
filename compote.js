@@ -198,6 +198,10 @@ const configFile = async () => {
             config.behavior = conf.behavior
         }
 
+        if ('options' in conf) {
+            config.options = conf.options
+        }
+
 
     }
     catch (e) {
@@ -333,6 +337,7 @@ async function server(request, response) {
     const mimeTypes = {
         '.html': 'text/html',
         '.js': 'text/javascript',
+        '.mjs': 'text/javascript',
         '.css': 'text/css',
         '.json': 'application/json',
         '.png': 'image/png',
@@ -345,10 +350,27 @@ async function server(request, response) {
         '.ttf': 'application/font-ttf',
         '.eot': 'application/vnd.ms-fontobject',
         '.otf': 'application/font-otf',
-        '.wasm': 'application/wasm'
+        '.wasm': 'application/wasm',
+		'.m3u8':`application/vnd.apple.mpegURL`,
+		'.m4s': 'video/iso.segment',
+		'.mp4': 'video/mp4',
+		'.ts':  'video/MP2T',
     }
 
     const contentType = mimeTypes[extname || '.html'] || 'application/octet-stream'
+    const exportedFiles = {
+        scripts: 'text/javascript',
+        styles: 'text/css',
+    }
+    for (const type in exportedFiles) {
+        if (contentType !== exportedFiles[type]) continue
+        const typePath = config.paths[`public_${type}`]
+        if (!filePath.startsWith(typePath)) continue
+        const componentName = filePath.slice(typePath.length + 1, extname.length * -1)
+        if (componentName.at(0) < 'A' || componentName.at(0) > 'Z') continue
+        filePath = `${config.paths.compiled}/${componentName}${extname}`
+        console.log('Re-routed', type, filePath)
+    }
     fsSync.readFile(filePath, function(error, content) {
         if (error) {
             if (error.code == 'ENOENT') {
@@ -446,7 +468,7 @@ async function build(compiledFilePath, attributes, response, request) {
             const env = {}
             Object.keys(process.env).filter(k => k.startsWith('PUBLIC_')).map(k => env[k] = process.env[k])
             const state = { env, locale: env.PUBLIC_LANG || 'fr', components: {} }
-            state.canonical = "${process.env.PUBLIC_DOMAIN ? `https://${process.env.PUBLIC_DOMAIN}${request.url}` : request.url}"
+            state.canonical = "${process.env.PUBLIC_DOMAIN ? `https://${process.env.PUBLIC_DOMAIN}${request.url}` : request.url ?? ''}"
 
             state.components[RequestedComponent.name] = RequestedComponent
             await Compote.loadDependencies(RequestedComponent, state.components, true, '${compiledFullPath}')
@@ -490,20 +512,26 @@ async function initProject() {
     }
 
     const defaultConfig = {
+        "server": {
+            "port": 8080,
+        },
         "paths": {
             "src": "./src/components",
             "compiled": "./.compote/compiled",
             "public": "./public",
+            "public_scripts": "./public/js",
+            "public_styles": "./public/css",
             "dist": "./dist",
             "cache": "./.compote/cache"
-        },
-        "server": {
-            "port": 8080,
         },
         "routes": [
             { "match": "^index\\.html$", "page": "HomePage" },
             { "match": 404, "page": "NotFoundPage", "args": [ "path", "query" ] }
-        ]        
+        ],
+        "options": {
+            "scripts": "hash",
+            "styles": "hash",
+        }       
     }
     const defaultConfigString = JSON.stringify(defaultConfig, null, 2)
     for (const p in defaultConfig.paths) {
@@ -814,6 +842,27 @@ Developement:
         await fs.writeFile(outputFile, output)
             .catch(e => exit(`can't write the file ${outputFile} !`, e))
 
+        // Enregistre le script et les styles
+        const assets = { 
+            js: compiled.script,
+            css: compiled.style,
+        }
+        for (const ext in assets) {
+            if (assets[ext]?.trim()) {
+                let assetFile = outputFile.replace('.tpl.mjs', `.${ext}`)
+
+                // Si l'option "minimize" est activée
+                if (config.options[`minify_${ext}`]) {
+                    // TODO: assetFile = ...
+                }
+
+                await fs.writeFile(assetFile, assets[ext])
+                    .catch(e => exit(`can't write the asset file ${assetFile} !`, e))
+            } 
+            else {
+                // TODO: Supprimer le fichier si existant
+            }
+        }
     }
 
 
@@ -1012,6 +1061,33 @@ Developement:
     }
     
 }
+
+/*
+function buildStyleVars(vars) {
+    const block = []
+    for (const variable in vars) {
+        block.push(`--${variable}: ${vars[variable]};`)
+    }
+    return block.length ? `\n:root {\n${block.join("\n")}\n}\n` : ''
+}
+
+function buildScriptVars(vars, labels={}) {
+    const list = []
+    for (const variable in vars) {
+        list.push(`const ${variable} = ${JSON.stringify(vars[variable])};\n`)
+    }
+    for (const label in labels) {
+        const code = typeof labels[label] === 'string' 
+            ? `\`${labels[label]}\`` 
+            : `(_) => i18n(_, JSON.parse(\`${JSON.stringify(labels[label])}\`))`
+        list.push(`self['${label}'] = ${code};\n`)
+    }
+
+    return list.length ? `\n${list.join("\n")}\n` : ''
+}
+*/
+
+
 
 
 async function sections(path, name, file) {

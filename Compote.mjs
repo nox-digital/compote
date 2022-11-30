@@ -374,8 +374,14 @@ ___________________________________________________
 
         instance['…extra'] = Object.keys(attributes).filter(a => a !== '/' && !(a in component.___.param)).map(a => `${a}=${attributes[a]}`).join(' ')
         instance[`…${component.name}`] = slot
+        /*
+        if (component.___.script) {
+            component.___.script = {
+                src: 
+            }
+        }
+        */
     }
-
 
     static buildStyleVars(vars) {
         const block = []
@@ -384,7 +390,7 @@ ___________________________________________________
         }
         return block.length ? `\n:root {\n${block.join("\n")}\n}\n` : ''
     }
-
+/*
     static buildScriptVars(vars, labels={}) {
         const list = []
         for (const variable in vars) {
@@ -399,7 +405,7 @@ ___________________________________________________
 
         return list.length ? `\n${list.join("\n")}\n` : ''
     }
-
+*/
 
 
     static fn = {}
@@ -483,11 +489,12 @@ ___________________________________________________
                 
                 const scriptLabels = {}
                 Component.___.scriptLabels.forEach(l => scriptLabels[l] = Component.___.label[state.locale][l])
-                const script = Compote.buildScriptVars(state.page[name].scriptVars, scriptLabels)
-                if (script) scripts.push(`<script data-src=${name}>/*<![CDATA[*/\n${script}\n/*]]>*/</script>`)
+                // const script = Compote.buildScriptVars(state.page[name].scriptVars, scriptLabels)
+                const vars = { ...state.page[name].scriptVars, i18n: scriptLabels }
+                if (Object.keys(state.page[name].scriptVars).length || Object.keys(scriptLabels).length) scripts.push(`<script type="application/json" id=${name + 'JSON'}>${JSON.stringify(vars)}</script>`)
             }
             html = html.replace('<style id="compote-style"></style>', styles.join(''))
-            html = html.replace('<script id="compote-script"></script>', scripts.join(''))
+            html = html.replace('<script id="compote-json"></script>', scripts.join(''))
         }
         return html
     }
