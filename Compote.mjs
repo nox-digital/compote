@@ -194,10 +194,15 @@ ___________________________________________________
             let idx = 0
             const map = []
             const arr = this.functions.code(state, instance, _.of)
-            for (const v of arr) {
-                instance[_.v] = v
-                instance[_.v + '_$i'] = idx++
-                map.push(slot.map(pair => this.nextPair(state, instance, pair)))
+            try {
+                for (const v of arr) {
+                    instance[_.v] = v
+                    instance[_.v + '_$i'] = idx++
+                    map.push(slot.map(pair => this.nextPair(state, instance, pair)))
+                }
+            }
+            catch (e) {
+                throw new Error(`Build error - <${slot[0][0]._} {for ${_.v} of ...} is not iterable « ${typeof arr} »\n`)
             }
             return map
         },
@@ -207,12 +212,17 @@ ___________________________________________________
             let idx = 0
             const map = []
             const obj = this.functions.code(state, instance, _.in)
-            for (const k in obj) {
-                instance[_.k] = k
-                instance[_.v] = obj[k]
-                instance[_.v + '_$i'] = idx++
-                instance[_.v + '_$k'] = k
-                map.push(slot.map(pair => this.nextPair(state, instance, pair)))
+            try {
+                for (const k in obj) {
+                    instance[_.k] = k
+                    instance[_.v] = obj[k]
+                    instance[_.v + '_$i'] = idx++
+                    instance[_.v + '_$k'] = k
+                    map.push(slot.map(pair => this.nextPair(state, instance, pair)))
+                }
+            }
+            catch (e) {
+                throw new Error(`Build error - <${slot[0][0]._} {for ${_.v} in ...} is not iterable « ${typeof arr} »\n`)
             }
             return map
         },
@@ -262,7 +272,7 @@ ___________________________________________________
             let acceptedType = values[value]
             const optional = acceptedType.at(0) === '*'
             if (!(value in instance) && !optional) {
-                throw new Error(`Build error - Missing value « ${value} » on « ${caller?.constructor.name}->${instance.constructor.name} »\n${JSON.stringify(instance)}\n\n`)
+                throw new Error(`Build error - Missing value « ${value} » on « ${caller?.constructor.name}->${instance.constructor.name} »\n`)
             }
             const currentType = typeof instance[value]
             let pass = optional && [null, undefined].includes(instance[value])
