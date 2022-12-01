@@ -384,38 +384,7 @@ ___________________________________________________
 
         instance['…extra'] = Object.keys(attributes).filter(a => a !== '/' && !(a in component.___.param)).map(a => `${a}=${attributes[a]}`).join(' ')
         instance[`…${component.name}`] = slot
-        /*
-        if (component.___.script) {
-            component.___.script = {
-                src: 
-            }
-        }
-        */
     }
-
-    static buildStyleVars(vars) {
-        const block = []
-        for (const variable in vars) {
-            block.push(`--${variable}: ${vars[variable]};`)
-        }
-        return block.length ? `\n:root {\n${block.join("\n")}\n}\n` : ''
-    }
-/*
-    static buildScriptVars(vars, labels={}) {
-        const list = []
-        for (const variable in vars) {
-            list.push(`const ${variable} = ${JSON.stringify(vars[variable])};\n`)
-        }
-        for (const label in labels) {
-            const code = typeof labels[label] === 'string' 
-                ? `\`${labels[label]}\`` 
-                : `(_) => i18n(_, JSON.parse(\`${JSON.stringify(labels[label])}\`))`
-            list.push(`self['${label}'] = ${code};\n`)
-        }
-
-        return list.length ? `\n${list.join("\n")}\n` : ''
-    }
-*/
 
 
     static fn = {}
@@ -438,7 +407,6 @@ ___________________________________________________
         if (!('build' in state)) state.build = {}
         if (!('page' in state)) state.page = {}
         if (!(name in state.page)) state.page[name] = {}
-        if (!('styleVars' in state.page[name])) state.page[name].styleVars = {}
         if (!('scriptVars' in state.page[name])) state.page[name].scriptVars = {}        
         for (const f in Compote.fn) {
             if (f === 'env') continue
@@ -484,26 +452,22 @@ ___________________________________________________
         )).join('')
         
 
-        // Remplace les scripts/styles après avoir construit entièrement la page
+        // Injecte les données JSON (scriptVars + scriptLabels)
         if (newPage) {
-            const styles = []
             const scripts = []
 
             for (const name in state.components) {
 
                 if (!(name in state.page)) continue
                 const Component = state.components[name]
-
-                const style = Compote.buildStyleVars(state.page[name].styleVars)
-                if (style) styles.push(`<style data-src=${name}>\n${style}\n</style>`)
                 
                 const scriptLabels = {}
                 Component.___.scriptLabels.forEach(l => scriptLabels[l] = Component.___.label[state.locale][l])
-                // const script = Compote.buildScriptVars(state.page[name].scriptVars, scriptLabels)
                 const vars = { ...state.page[name].scriptVars, i18n: scriptLabels }
-                if (Object.keys(state.page[name].scriptVars).length || Object.keys(scriptLabels).length) scripts.push(`<script type="application/json" id=${name + 'JSON'}>${JSON.stringify(vars)}</script>`)
+                if (Object.keys(state.page[name].scriptVars).length || Object.keys(scriptLabels).length) {
+                    scripts.push(`<script type="application/json" id=${name + 'JSON'}>${JSON.stringify(vars)}</script>`)
+                }
             }
-            html = html.replace('<style id="compote-style"></style>', styles.join(''))
             html = html.replace('<script id="compote-json"></script>', scripts.join(''))
         }
         return html

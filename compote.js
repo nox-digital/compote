@@ -7,6 +7,7 @@ import { inspect } from 'util'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { exec, spawn } from 'child_process'
+import crypto from 'crypto'
 
 
 const customInspectSymbol = Symbol.for('nodejs.util.inspect.custom')
@@ -805,29 +806,7 @@ Developement:
 
         // Génère le source de sortie
         const opt = { depth: Infinity, colors: false }
-        const rawScript = compiled.script.replaceAll('`', '\\`').replaceAll('${', '\\${')
         await version()
-        let output = `${imports}export default class ${name} {
-        static ___ = {
-            compote: '${compoteVersion}',
-            component: ${name},
-            dependencies: ${inspect(dependencies, opt)},
-            prepared: 0,
-            setup:  ${inspect(compiled.setup, opt)},
-            param: ${inspect(compiled.param, opt)},
-            var: ${inspect(compiled.var, opt)},
-            data: ${inspect(compiled.data, opt)},
-            label: ${inspect(compiled.label, opt)},
-            scriptLabels: ${inspect(compiled.scriptLabels, opt)},
-            script:  ${rawScript ? ['\`', rawScript, '\`'].join('') : "''" },
-            style:  ${compiled.style ? ['\`', compiled.style.replaceAll('`', '\\'), '\`'].join('') : "''"},
-            template:  ${inspect(compiled.template, opt)},
-        }
-
-        constructor(Compote, state, attributes, slot) {
-            Compote.componentConstructor(this, ${name}, state, attributes, slot)
-        }\n${extend}}`
-        Object.keys(compiled).forEach((k,i) => compiled[i] = null)
 
         // Destination
         const outputFile = addPaths(compiledPath, `${name}.tpl.mjs`)
@@ -839,33 +818,60 @@ Developement:
             await fs.mkdir(outputPath, { recursive: true })
         }
 
-        // Enregistre le fichier
-        await fs.writeFile(outputFile, output)
-            .catch(e => exit(`can't write the file ${outputFile} !`, e))
-
         // Enregistre le script et les styles
         const assets = { 
             js: compiled.script,
             css: compiled.style,
         }
         for (const ext in assets) {
-            if (assets[ext]?.trim()) {
-                let assetFile = outputFile.replace('.tpl.mjs', `.${ext}`)
+            let i = 0
+            for (const a of assets[ext]) {
 
-                // Si l'option "minimize" est activée
-                if (config.options[`minify_${ext}`]) {
-                    // TODO: assetFile = ...
+                if (a.content?.trim()) {
+                    let assetFile = a.file || `${name}${++i > 1 ? i : ''}.${ext}`
+    
+                    // Si l'option "minimize" est activée
+                    if (config.options[`minify_${ext}`]) {
+                        // TODO: assetFile = ...
+                    }
+    
+                    await fs.writeFile(`${outputPath}/${assetFile}`, a.content)
+                        .catch(e => exit(`can't write the asset file ${outputPath}/${assetFile} !`, e))
+                    a.file = assetFile
+                    const b64 = crypto.createHash('sha256').update(a.content).digest('base64')
+                    a.integrity = `sha256-${b64}`
+                    delete a.content
                 }
-
-                await fs.writeFile(assetFile, assets[ext])
-                    .catch(e => exit(`can't write the asset file ${assetFile} !`, e))
-                
-                // const assetHash = 
-            } 
-            else {
-                // TODO: Supprimer le fichier si existant
             }
         }
+
+
+        // Enregistre le fichier template
+        let output = `${imports}export default class ${name} {
+            static ___ = {
+                compote: '${compoteVersion}',
+                component: ${name},
+                dependencies: ${inspect(dependencies, opt)},
+                prepared: 0,
+                setup:  ${inspect(compiled.setup, opt)},
+                param: ${inspect(compiled.param, opt)},
+                var: ${inspect(compiled.var, opt)},
+                data: ${inspect(compiled.data, opt)},
+                label: ${inspect(compiled.label, opt)},
+                scriptLabels: ${inspect(compiled.scriptLabels, opt)},
+                script: ${inspect(assets.js, opt)},
+                style: ${inspect(assets.css, opt)},
+                template:  ${inspect(compiled.template, opt)},
+            }
+    
+            constructor(Compote, state, attributes, slot) {
+                Compote.componentConstructor(this, ${name}, state, attributes, slot)
+            }\n${extend}}`
+        Object.keys(compiled).forEach((k,i) => compiled[i] = null)
+        await fs.writeFile(outputFile, output)
+            .catch(e => exit(`can't write the file ${outputFile} !`, e))
+
+
     }
 
 
@@ -1102,8 +1108,8 @@ async function sections(path, name, file) {
         data:       { _: '<DATA',       closingOpenTag: { _: '>', closer: '</DATA>' } },
         label:      { _: '<LABEL',      closingOpenTag: { _: '>', closer: '</LABEL>' } },
         template:   { _: '<TEMPLATE',   closingOpenTag: { _: '>', closer: '</TEMPLATE>' } },
-        style:      { _: '<STYLE',      closingOpenTag: { _: '>', closer: '</STYLE>' } },
-        script:     { _: '<SCRIPT',     closingOpenTag: { _: '>', closer: '</SCRIPT>' } },
+        style:      { _: '<STYLE',      closingOpenTag: { _: '>', closer: '</STYLE>' }, multiple: 1 },
+        script:     { _: '<SCRIPT',     closingOpenTag: { _: '>', closer: '</SCRIPT>' }, multiple: 1 },
     }    
 
     const next = indexOf({ text: file, searches: tags, start: 0, all: true, slices: false })
@@ -1119,10 +1125,16 @@ async function sections(path, name, file) {
             // Extrait le code et enlève le 1er et dernier saut de ligne à l'intérieur si nécessaire
             const sectionStart = next[tag].closingOpenTag.$
             const sectionStop = next[tag].closingOpenTag.closer._
-            code[tag] = file.slice(
+            let codeSlice = file.slice(
                 sectionStart + (file.at(sectionStart) === "\n" ? 1 : 0), 
                 sectionStop - (file.at(sectionStop - 1) === "\n" ? 1 : 0))
 
+            if (tags[tag].multiple) {
+                if (!Array.isArray(code[tag])) code[tag] = []
+                code[tag].push({ content: codeSlice })
+            }
+            else code[tag] = codeSlice
+            codeSlice = null
 
             // Analyse les attributs
             const attributes = file.slice(next[tag].$, next[tag].closingOpenTag._).trim().split(' ')
@@ -1131,12 +1143,20 @@ async function sections(path, name, file) {
                 const eq = a.indexOf('=')
                 const name = eq === -1 ? a : a.slice(0, eq)
                 const value = eq === -1 ? undefined : a.slice(eq + 1).replaceAll('"', '').replaceAll("'", '')
+                const last = code[tag].length - 1
 
                 // fetching method: async / defer 
-                if (tag === 'script' && ['defer', 'async'].includes(name)) compiled.setup.scriptLoad = name
+                if (tag === 'script' && ['defer', 'async'].includes(name)) code[tag][last].load = name
+
+                // Styles visible en premier
+                if (tag === 'style' && name === 'first') code[tag][last].first = true
+
+                // Assigner un nom de fichier spécifique
+                if (['script', 'style'].includes(tag) && name === 'filename') code[tag][last].file = name
+
 
                 // Contenu à importer depuis un fichier externe
-                if (name === 'import') {
+                if (['script', 'style'].includes(tag) && name === 'import') {
                     const toImport = `${path}/${value}`
                      
                     const importedFile = await fs.readFile(toImport, { encoding: 'utf-8' })
@@ -1144,22 +1164,26 @@ async function sections(path, name, file) {
                         
                     if (importedFile) {
                         
-                        // Si cette fonction vide existe, on la remplace par celui de la balise SCRIPT
+                        let concat = true
+
+                        // Si une fonction vide nommée « script${name} » existe, on la remplace par le contenu de la balise SCRIPT
                         if (tag === 'script') {
                             const asideScript = `function script${name}() {}`
                             const idx = importedFile.indexOf(asideScript)
                             if (idx > -1) {
-                                code[tag] = importedFile.slice(0, idx + asideScript.length - 1)
-                                    + `\n${code[tag]}\n`
-                                    + importedFile.slice(idx + asideScript.length - 1)
+                                code[tag][last].content = importedFile.slice(0, idx + asideScript.length - 1)
+                                                        + `\n${code[tag][last].content}\n`
+                                                        + importedFile.slice(idx + asideScript.length - 1)
+                                concat = false
                             }
-                            else code[tag] = importedFile + code[tag]
                         }
 
-                        else code[tag] = importedFile + code[tag]
-                    }                
-                }
-                
+                        // Sinon on concatène la partie inline après le fichier importé
+                        if (concat) {
+                            code[tag][last].content = `${importedFile}\n${code[tag][last].content}`
+                        }
+                    }
+                }   
             }
         }
         else code[tag] = ''
