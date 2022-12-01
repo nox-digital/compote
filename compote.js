@@ -274,7 +274,8 @@ async function server(request, response) {
 
     
     console.log('HTTP request ', request.url)
-    const url = request.url.at(-1) === '/' ? `${request.url}index.html` : request.url
+    const [ urlWithoutParams, params ] = request.url.split('?', 1)
+    const url = urlWithoutParams.at(-1) === '/' ? `${urlWithoutParams}index.html` : urlWithoutParams
     let filePath
 
     // Route demandée
@@ -858,6 +859,8 @@ Developement:
 
                 await fs.writeFile(assetFile, assets[ext])
                     .catch(e => exit(`can't write the asset file ${assetFile} !`, e))
+                
+                // const assetHash = 
             } 
             else {
                 // TODO: Supprimer le fichier si existant
@@ -1123,24 +1126,14 @@ async function sections(path, name, file) {
 
             // Analyse les attributs
             const attributes = file.slice(next[tag].$, next[tag].closingOpenTag._).trim().split(' ')
-            let addListener = ''
             for (const a of attributes) {
 
                 const eq = a.indexOf('=')
                 const name = eq === -1 ? a : a.slice(0, eq)
                 const value = eq === -1 ? undefined : a.slice(eq + 1).replaceAll('"', '').replaceAll("'", '')
 
-                // AddEventListener
-                // ----------------
-                // on=readystatechange  => addEventListener('readystatechange')
-                // on=interactive       => addEventListener('readystatechange') + readystate=interactive
-                // on=DOMContentLoaded  => addEventListener('DOMContentLoaded')
-                // on=complete          => addEventListener('readystatechange') + readystate=complete
-                // on=load              => addEventListener('load')
-                // on=unload            => addEventListener('unload')
-                if (name === 'on') {
-                    addListener = value
-                }
+                // fetching method: async / defer 
+                if (tag === 'script' && ['defer', 'async'].includes(name)) compiled.setup.scriptLoad = name
 
                 // Contenu à importer depuis un fichier externe
                 if (name === 'import') {
@@ -1167,15 +1160,6 @@ async function sections(path, name, file) {
                     }                
                 }
                 
-            }
-            if (addListener && code[tag]) {
-                let ev = addListener
-                let condition = ''
-                if (['interactive', 'complete'].includes(addListener)) {
-                    condition = `if (document.readyState !== '${addListener}') return;\n`
-                    ev = 'readystatechange'
-                }
-                code[tag] = `document.addEventListener('${ev}', (_event_) => {\n${condition}${code[tag]}\n});`
             }
         }
         else code[tag] = ''
