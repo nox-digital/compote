@@ -559,6 +559,15 @@ async function initProject() {
     process.exit(0)
 }
 
+async function integrity(content, algo='sha256') {
+    const b64 = crypto.createHash(algo).update(content).digest('base64')
+    return {
+        integrity: `${algo}-${b64}`,
+        hash: b64.replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '~'),
+    }
+}
+
+
 async function compote(args=[]) {
 
     const startTime = new Date()
@@ -838,8 +847,7 @@ Developement:
                     await fs.writeFile(`${outputPath}/${assetFile}`, a.content)
                         .catch(e => exit(`can't write the asset file ${outputPath}/${assetFile} !`, e))
                     a.file = assetFile
-                    const b64 = crypto.createHash('sha256').update(a.content).digest('base64')
-                    a.integrity = `sha256-${b64}`
+                    Object.assign(a, await integrity(a.content))
                     delete a.content
                 }
             }
