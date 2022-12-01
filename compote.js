@@ -283,6 +283,7 @@ async function server(request, response) {
     let ssr
     if (app.devMode) {
         ssr = (route) => {
+
             // Vérifie que le chemin indiqué par la route existe puis l'importe
             const compiledFilePath = addPaths(config.paths?.compiled, `${route.page}.tpl.mjs`)
             if (!fsSync.existsSync(compiledFilePath)) {
@@ -328,6 +329,24 @@ async function server(request, response) {
             return ssr(route)
         }
 
+    }
+
+    // Communication spécifique pour le server compote /.well-known/compote
+    if (request.url.startsWith('/.well-known/compote')) {
+        const POST = {}
+        console.log(`!!!!!!!!!!!!!!!! ${request.url} !!!!!!!!!!!!!!!!`)
+        if (request.method.toUpperCase() === 'POST') {
+            request.on('data', function(data) {
+                try {
+                    console.dir(JSON.parse(data.toString()), { depth: Infinity })
+                }
+                catch (e) {
+                    console.log(data)
+                }
+            })
+        }
+        response.writeHead(418)
+        return response.end('')
     }
 
 
@@ -487,7 +506,20 @@ async function build(compiledFilePath, attributes, response, request) {
     if (config.functions) argv.push(config.functions)
     const compote = new Worker(workerCode, { eval: true, argv })
     compote.once('message', content => {
-        response.writeHead(200, { 'Content-Type': 'text/html' })
+        const headers = { ...(config.options.headers ?? {}), 'Content-Type': 'text/html' }
+        const csp = 'Content-Security-Policy'
+        if (csp in headers) {
+            const idx = content.indexOf(csp)
+            const quote = content.at(idx - 1)
+            const after = `${(quote === '=' ? '' : quote)} content="`
+            const until = idx + csp.length + after.length
+            if (content.slice(idx + csp.length, until) === after) {
+                const extract = content.slice(until, content.indexOf('"', until))
+                console.log('DETECTED', extract)
+                headers[csp] = headers[csp].replace('{CSP}', extract)
+            }
+        }
+        response.writeHead(200, headers)
         response.end(content, 'utf-8')
     })
     compote.once('error', content => {
@@ -533,6 +565,9 @@ async function initProject() {
         "options": {
             "scripts": "hash",
             "styles": "hash",
+            "headers": {
+                "Content-Security-Policy": "report-uri /.well-known/compote; {CSP}"
+            }
         }       
     }
     const defaultConfigString = JSON.stringify(defaultConfig, null, 2)
@@ -1609,7 +1644,8 @@ async function compileTemplate(start, stop, depth=0, parentTag='') {
                         const unprotected = isSlot || code.template.startsWith(config.syntax.unprotected, n.expression.$)
                         const encode = unprotected ? false : config.behavior.encode.auto
 
-                        const x = slice(unprotected ? n.expression.$ + config.syntax.unprotected.length : n.expression.$ , n.expression.closer._)
+                        let x = slice(unprotected ? n.expression.$ + config.syntax.unprotected.length : n.expression.$ , n.expression.closer._)
+                        if (x.at(0) === '{' && x.at(-1) === '}') x = `Object(${x})`
                         
                         toPush = isSlot ? [{s: new Slot(x) }] : [{x: new Expression(x) }]
                         push(encode ? [{e: '>'}, toPush] : toPush)
