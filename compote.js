@@ -334,7 +334,7 @@ async function server(request, response) {
     // Communication spécifique pour le server compote /.well-known/compote
     if (request.url.startsWith('/.well-known/compote')) {
         const POST = {}
-        console.log(`!!!!!!!!!!!!!!!! ${request.url} !!!!!!!!!!!!!!!!`)
+        console.log(`-------------- ${request.url} --------------`)
         if (request.method.toUpperCase() === 'POST') {
             request.on('data', function(data) {
                 try {
@@ -345,7 +345,7 @@ async function server(request, response) {
                 }
             })
         }
-        response.writeHead(418)
+        response.writeHead(200)
         return response.end('')
     }
 
@@ -507,6 +507,8 @@ async function build(compiledFilePath, attributes, response, request) {
     const compote = new Worker(workerCode, { eval: true, argv })
     compote.once('message', content => {
         const headers = { ...(config.options.headers ?? {}), 'Content-Type': 'text/html' }
+
+        // Si l'entête CSP est demandé, on extrait la balise meta concernée pour l'injecter dans le header HTTP
         const csp = 'Content-Security-Policy'
         if (csp in headers) {
             const idx = content.indexOf(csp)
@@ -515,7 +517,6 @@ async function build(compiledFilePath, attributes, response, request) {
             const until = idx + csp.length + after.length
             if (content.slice(idx + csp.length, until) === after) {
                 const extract = content.slice(until, content.indexOf('"', until))
-                console.log('DETECTED', extract)
                 headers[csp] = headers[csp].replace('{CSP}', extract)
             }
         }
@@ -1190,6 +1191,9 @@ async function sections(path, name, file) {
 
                 // fetching method: async / defer 
                 if (tag === 'script' && ['defer', 'async'].includes(name)) code[tag][last].load = name
+
+                // preload hint 
+                if (['script', 'style'].includes(tag) && name === 'preload') code[tag][last].preload = true
 
                 // Styles visible en premier
                 if (tag === 'style' && name === 'first') code[tag][last].first = true
