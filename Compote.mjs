@@ -463,7 +463,8 @@ ___________________________________________________
                 
                 const scriptLabels = {}
                 Component.___.scriptLabels.forEach(l => scriptLabels[l] = Component.___.label[state.locale][l])
-                const vars = { ...state.page[name].scriptVars, i18n: scriptLabels }
+                const vars = { ...state.page[name].scriptVars }
+                if (Object.keys(scriptLabels).length) vars.i18n = scriptLabels 
                 if (Object.keys(state.page[name].scriptVars).length || Object.keys(scriptLabels).length) {
                     scripts.push(`<script type="application/json" id=${name + 'JSON'}>${JSON.stringify(vars)}</script>`)
                 }
