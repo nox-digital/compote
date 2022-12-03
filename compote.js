@@ -564,8 +564,7 @@ async function initProject() {
             { "match": 404, "page": "NotFoundPage", "args": [ "path", "query" ] }
         ],
         "options": {
-            "scripts": "hash",
-            "styles": "hash",
+            "hash_files": "js,css",
             "headers": {
                 "Content-Security-Policy": "report-uri /.well-known/compote; {CSP}"
             }
@@ -599,7 +598,7 @@ async function integrity(content, algo='sha256') {
     const b64 = crypto.createHash(algo).update(content).digest('base64')
     return {
         integrity: `${algo}-${b64}`,
-        hash: b64.replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '~'),
+        hash: simpleHash(b64), // b64.replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '~'),
     }
 }
 
@@ -884,6 +883,13 @@ Developement:
                         .catch(e => exit(`can't write the asset file ${outputPath}/${assetFile} !`, e))
                     a.file = assetFile
                     Object.assign(a, await integrity(a.content))
+                    const lastDot = a.file.lastIndexOf('.')
+                    a.file_hash = `${a.file.slice(0, lastDot)}.${a.hash}.${a.file.slice(lastDot + 1)}`
+                    await fs.link(`${outputPath}/${assetFile}`,`${outputPath}/${a.file_hash}`)
+                        .catch(e => {
+                            if (e.code === 'EEXIST') return
+                            exit(`can't write the asset hashed filename link ${outputPath}/${a.hash_file} !`, e)
+                        })
                     delete a.content
                 }
             }
@@ -1927,7 +1933,15 @@ async function findComponentFiles(path) {
 function min(a, b) { return a < b ? a : b }
 function max(a, b) { return a > b ? a : b }
 
-
+function simpleHash(str) {
+    let hash = 0
+    for (let i = 0; i < str.length; i++) {
+      const char = str.charCodeAt(i)
+      hash = (hash << 5) - hash + char
+      hash &= hash
+    }
+    return new Uint32Array([hash])[0].toString(36)
+}
 
 /**
  * Recherche dans « str » la position la plus proche d'une occurence de l'objet « searches »
