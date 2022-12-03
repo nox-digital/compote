@@ -1073,12 +1073,15 @@ Developement:
 
         const onchange = (dir, eventType, file) => {
             if (eventType !== 'change') return
-            const ext = file.slice(file.indexOf('.'))
+            const ext = file.slice(file.lastIndexOf('.'))
             if (!['.html', '.css', '.js', '.mjs'].includes(ext)) return
 
             const name = file.split('.')[0]
             const filepath = `${dir}/${name}.html`
-            if (!fsSync.existsSync(filepath)) return
+            if (!fsSync.existsSync(filepath)) {
+                console.warn(`Detected changes in ${filepath} but can't detect the related component. Use the file format « ComponentRelated.YourFileName.[css/js] »`)
+                return
+            }
 
             clearTimeout(dedup[filepath])
             dedup[filepath] = setTimeout(() => { 
@@ -1205,49 +1208,65 @@ async function sections(path, component, file, start=0, onlyTag) {
 
                 if (multi) {
 
-                    // fetching method: async / defer 
-                    if (tag === 'script' && ['defer', 'async'].includes(name)) slice.load = name
+                    // Spécifique aux scripts
+                    if (tag === 'script') {
 
-                    // preload hint 
-                    if (['script', 'style'].includes(tag) && name === 'preload') slice.preload = true
+                        // fetching method: async / defer 
+                        if (['defer', 'async'].includes(name)) slice[name] = true
+                    }
 
-                    // Styles visible en premier
-                    if (tag === 'style' && name === 'above-the-fold') slice.aboveTheFold = true
+                    // Spécifique aux styles
+                    if (tag === 'styles') {
 
-                    // Assigner un nom de fichier spécifique
-                    if (['script', 'style'].includes(tag) && name === 'filename') slice.file = value
+                        // Styles au-dessus de la ligne de flotaison (si l'on souhaite chargé en priorité ceux-là et en asynchrone les autres styles) 
+                        if (tag === 'style' && name === 'above-the-fold') slice.aboveTheFold = true
+
+                    }
+
+                    // Spécifiques aux scripts/styles
+                    if (['script', 'style'].includes(tag)) {
+
+                        // preload hint 
+                        if (name === 'preload') slice.preload = true
+
+                        // Assigner un nom de fichier spécifique
+                        if (name === 'filename') slice.file = value
 
 
-                    // Contenu à importer depuis un fichier externe
-                    if (['script', 'style'].includes(tag) && name === 'import') {
-                        const toImport = `${path}/${value}`
-                        
-                        const importedFile = await fs.readFile(toImport, { encoding: 'utf-8' })
-                            .catch(e => exit(`can't read the file ${toImport} !`, e))
+                        // Code à importer depuis un fichier externe
+                        if (name === 'import') {
+                            const toImport = `${path}/${value}`
                             
-                        if (importedFile) {
-                            if (!slice.file) slice.file = value
-                            let concat = true
+                            const importedFile = await fs.readFile(toImport, { encoding: 'utf-8' })
+                                .catch(e => exit(`can't read the file ${toImport} !`, e))
+                                
+                            if (importedFile) {
+                                if (!slice.file) slice.file = value
+                                let concat = true
 
-                            // Si une fonction vide nommée « script${component} » existe, on la remplace par le contenu de la balise SCRIPT
-                            if (tag === 'script') {
-                                const asideScript = `function script${component}() {}`
-                                const idx = importedFile.indexOf(asideScript)
-                                if (idx > -1) {
-                                    // slice.content = slice.content.replace(asideScript, `function script${component} {\n${slice.content}\n}`)
-                                    slice.content = importedFile.slice(0, idx + asideScript.length - 1)
-                                                            + `\n${slice.content}\n`
-                                                            + importedFile.slice(idx + asideScript.length - 1)
-                                    concat = false
+                                // Si une fonction vide nommée « script${component} » existe, on la remplace par le contenu de la balise SCRIPT
+                                if (tag === 'script') {
+                                    const asideScript = `function script${component}() {}`
+                                    const idx = importedFile.indexOf(asideScript)
+                                    if (idx > -1) {
+                                        // slice.content = slice.content.replace(asideScript, `function script${component} {\n${slice.content}\n}`)
+                                        slice.content = importedFile.slice(0, idx + asideScript.length - 1)
+                                                                + `\n${slice.content}\n`
+                                                                + importedFile.slice(idx + asideScript.length - 1)
+                                        concat = false
+                                    }
+                                }
+
+                                // Sinon on concatène la partie inline après le fichier importé
+                                if (concat) {
+                                    slice.content = `${importedFile}\n${slice.content}`
                                 }
                             }
+                        }   
 
-                            // Sinon on concatène la partie inline après le fichier importé
-                            if (concat) {
-                                slice.content = `${importedFile}\n${slice.content}`
-                            }
-                        }
-                    }   
+
+                    }
+
                 }
             }
 
