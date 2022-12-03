@@ -1240,7 +1240,6 @@ async function sections(path, component, file, start=0, onlyTag) {
                                                             + importedFile.slice(idx + asideScript.length - 1)
                                     concat = false
                                 }
-                                if (component === 'Page') console.log({ asideScript, idx, concat })
                             }
 
                             // Sinon on concatène la partie inline après le fichier importé
