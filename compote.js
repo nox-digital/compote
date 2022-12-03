@@ -1120,30 +1120,6 @@ Developement:
     
 }
 
-/*
-function buildStyleVars(vars) {
-    const block = []
-    for (const variable in vars) {
-        block.push(`--${variable}: ${vars[variable]};`)
-    }
-    return block.length ? `\n:root {\n${block.join("\n")}\n}\n` : ''
-}
-
-function buildScriptVars(vars, labels={}) {
-    const list = []
-    for (const variable in vars) {
-        list.push(`const ${variable} = ${JSON.stringify(vars[variable])};\n`)
-    }
-    for (const label in labels) {
-        const code = typeof labels[label] === 'string' 
-            ? `\`${labels[label]}\`` 
-            : `(_) => i18n(_, JSON.parse(\`${JSON.stringify(labels[label])}\`))`
-        list.push(`self['${label}'] = ${code};\n`)
-    }
-
-    return list.length ? `\n${list.join("\n")}\n` : ''
-}
-*/
 
 
 
