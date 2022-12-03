@@ -1145,7 +1145,7 @@ function buildScriptVars(vars, labels={}) {
 
 
 
-async function sections(path, name, file, start=0, onlyTag) {
+async function sections(path, component, file, start=0, onlyTag) {
 
     const tags = {
         setup:      { _: '<SETUP',      closingOpenTag: { _: '>', closer: '</SETUP>' } },
@@ -1180,19 +1180,19 @@ async function sections(path, name, file, start=0, onlyTag) {
         const found = next[tag] && next[tag]._ > -1
 
         if (found) {
-            if (!(next[tag].closingOpenTag?.closer?._ > -1)) throw new Error(`> compile ${name} - ERROR: not found the closing tag </${tag.toUpperCase()}> (case sensitive)`)
+            if (!(next[tag].closingOpenTag?.closer?._ > -1)) throw new Error(`> compile ${component} - ERROR: not found the closing tag </${tag.toUpperCase()}> (case sensitive)`)
             if (atLeast.includes(tag)) foundRequired++
 
             // Extrait le code et enlève le 1er et dernier saut de ligne à l'intérieur si nécessaire
             const sectionStart = next[tag].closingOpenTag.$
             const sectionStop = next[tag].closingOpenTag.closer._
-            let codeSlice = {
+            let slice = {
                 content: file.slice(
                     sectionStart + (file.at(sectionStart) === "\n" ? 1 : 0), 
                     sectionStop - (file.at(sectionStop - 1) === "\n" ? 1 : 0))
             }
-            if (multi) code[tag].push(codeSlice)
-            else code[tag] = codeSlice.content
+            if (multi) code[tag].push(slice)
+            else code[tag] = slice.content
 
 
             // Analyse les attributs
@@ -1206,16 +1206,16 @@ async function sections(path, name, file, start=0, onlyTag) {
                 if (multi) {
 
                     // fetching method: async / defer 
-                    if (tag === 'script' && ['defer', 'async'].includes(name)) codeSlice.load = name
+                    if (tag === 'script' && ['defer', 'async'].includes(name)) slice.load = name
 
                     // preload hint 
-                    if (['script', 'style'].includes(tag) && name === 'preload') codeSlice.preload = true
+                    if (['script', 'style'].includes(tag) && name === 'preload') slice.preload = true
 
                     // Styles visible en premier
-                    if (tag === 'style' && name === 'first') codeSlice.first = true
+                    if (tag === 'style' && name === 'above-the-fold') slice.aboveTheFold = true
 
                     // Assigner un nom de fichier spécifique
-                    if (['script', 'style'].includes(tag) && name === 'filename') codeSlice.file = value
+                    if (['script', 'style'].includes(tag) && name === 'filename') slice.file = value
 
 
                     // Contenu à importer depuis un fichier externe
@@ -1226,24 +1226,26 @@ async function sections(path, name, file, start=0, onlyTag) {
                             .catch(e => exit(`can't read the file ${toImport} !`, e))
                             
                         if (importedFile) {
-                            if (!codeSlice.file) codeSlice.file = value
+                            if (!slice.file) slice.file = value
                             let concat = true
 
-                            // Si une fonction vide nommée « script${name} » existe, on la remplace par le contenu de la balise SCRIPT
+                            // Si une fonction vide nommée « script${component} » existe, on la remplace par le contenu de la balise SCRIPT
                             if (tag === 'script') {
-                                const asideScript = `function script${name}() {}`
-                                const idx = importedFile.indexOf(asideScript) === -1
+                                const asideScript = `function script${component}() {}`
+                                const idx = importedFile.indexOf(asideScript)
                                 if (idx > -1) {
-                                    codeSlice.content = importedFile.slice(0, idx + asideScript.length - 1)
-                                                            + `\n${codeSlice.content}\n`
+                                    // slice.content = slice.content.replace(asideScript, `function script${component} {\n${slice.content}\n}`)
+                                    slice.content = importedFile.slice(0, idx + asideScript.length - 1)
+                                                            + `\n${slice.content}\n`
                                                             + importedFile.slice(idx + asideScript.length - 1)
                                     concat = false
                                 }
+                                if (component === 'Page') console.log({ asideScript, idx, concat })
                             }
 
                             // Sinon on concatène la partie inline après le fichier importé
                             if (concat) {
-                                codeSlice.content = `${importedFile}\n${codeSlice.content}`
+                                slice.content = `${importedFile}\n${slice.content}`
                             }
                         }
                     }   
@@ -1255,11 +1257,11 @@ async function sections(path, name, file, start=0, onlyTag) {
         }
 
     }
-    if (!foundRequired && !onlyTag) throw new Error(`> compile ${name} : Not found any of one of required tags: <TEMPLATE></TEMPLATE>, <STYLE></STYLE> or <SCRIPT></SCRIPT> (case sensitive)`)
+    if (!foundRequired && !onlyTag) throw new Error(`> compile ${component} : Not found any of one of required tags: <TEMPLATE></TEMPLATE>, <STYLE></STYLE> or <SCRIPT></SCRIPT> (case sensitive)`)
 
 
     for (const next of nextOnlyTags) {
-        sections(path, name, file, next.start, next.tag)
+        sections(path, component, file, next.start, next.tag)
     }
 }
 
