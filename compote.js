@@ -1192,11 +1192,14 @@ async function sections(path, component, file, start=0, onlyTag) {
                     }
 
                     // Spécifique aux styles
-                    if (tag === 'styles') {
+                    if (tag === 'style') {
 
                         // Styles au-dessus de la ligne de flotaison (si l'on souhaite chargé en priorité ceux-là et en asynchrone les autres styles) 
-                        if (tag === 'style' && name === 'above-the-fold') slice.aboveTheFold = true
+                        if (name === 'above-the-fold') slice.aboveTheFold = true
 
+                        if (name === 'scoped') slice.scoped = true
+
+                        if (name === 'defer') slice.defer = true 
                     }
 
                     // Spécifiques aux scripts/styles
