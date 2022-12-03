@@ -1078,6 +1078,8 @@ Developement:
 
             const name = file.split('.')[0]
             const filepath = `${dir}/${name}.html`
+            if (!fsSync.existsSync(filepath)) return
+
             clearTimeout(dedup[filepath])
             dedup[filepath] = setTimeout(() => { 
                 console.log(`\ncomponent ${name}${ext} ${eventType}`)
@@ -1143,7 +1145,7 @@ function buildScriptVars(vars, labels={}) {
 
 
 
-async function sections(path, name, file) {
+async function sections(path, name, file, start=0, onlyTag) {
 
     const tags = {
         setup:      { _: '<SETUP',      closingOpenTag: { _: '>', closer: '</SETUP>' } },
@@ -1152,33 +1154,46 @@ async function sections(path, name, file) {
         data:       { _: '<DATA',       closingOpenTag: { _: '>', closer: '</DATA>' } },
         label:      { _: '<LABEL',      closingOpenTag: { _: '>', closer: '</LABEL>' } },
         template:   { _: '<TEMPLATE',   closingOpenTag: { _: '>', closer: '</TEMPLATE>' } },
-        style:      { _: '<STYLE',      closingOpenTag: { _: '>', closer: '</STYLE>' }, multiple: 1 },
-        script:     { _: '<SCRIPT',     closingOpenTag: { _: '>', closer: '</SCRIPT>' }, multiple: 1 },
-    }    
+        style:      { _: '<STYLE',      closingOpenTag: { _: '>', closer: '</STYLE>' } },
+        script:     { _: '<SCRIPT',     closingOpenTag: { _: '>', closer: '</SCRIPT>' } },
+    }
+    if (onlyTag) {
+        for (const k in tags) {
+            if (k !== onlyTag) delete tags[k]
+        }
+    }
 
-    const next = indexOf({ text: file, searches: tags, start: 0, all: true, slices: false })
+    const next = indexOf({ text: file, searches: tags, start, all: true, slices: false })
 
     // Vérifie qu'il y ait au moins l'un des tags requis et que chaque tag ouvert ait une fermeture 
     const atLeast = ['template', 'style', 'script']
+    const nextOnlyTags = []
     let foundRequired = 0    
     for (const tag of Object.keys(tags)) {
-        if (next[tag] && next[tag]._ > -1) {
+
+        const multi = ['script', 'style'].includes(tag)
+        if (multi) {
+            if (!Array.isArray(code[tag])) code[tag] = []
+        }
+        else code[tag] = ''
+
+        const found = next[tag] && next[tag]._ > -1
+
+        if (found) {
             if (!(next[tag].closingOpenTag?.closer?._ > -1)) throw new Error(`> compile ${name} - ERROR: not found the closing tag </${tag.toUpperCase()}> (case sensitive)`)
             if (atLeast.includes(tag)) foundRequired++
 
             // Extrait le code et enlève le 1er et dernier saut de ligne à l'intérieur si nécessaire
             const sectionStart = next[tag].closingOpenTag.$
             const sectionStop = next[tag].closingOpenTag.closer._
-            let codeSlice = file.slice(
-                sectionStart + (file.at(sectionStart) === "\n" ? 1 : 0), 
-                sectionStop - (file.at(sectionStop - 1) === "\n" ? 1 : 0))
-
-            if (tags[tag].multiple) {
-                if (!Array.isArray(code[tag])) code[tag] = []
-                code[tag].push({ content: codeSlice })
+            let codeSlice = {
+                content: file.slice(
+                    sectionStart + (file.at(sectionStart) === "\n" ? 1 : 0), 
+                    sectionStop - (file.at(sectionStop - 1) === "\n" ? 1 : 0))
             }
-            else code[tag] = codeSlice
-            codeSlice = null
+            if (multi) code[tag].push(codeSlice)
+            else code[tag] = codeSlice.content
+
 
             // Analyse les attributs
             const attributes = file.slice(next[tag].$, next[tag].closingOpenTag._).trim().split(' ')
@@ -1187,56 +1202,65 @@ async function sections(path, name, file) {
                 const eq = a.indexOf('=')
                 const name = eq === -1 ? a : a.slice(0, eq)
                 const value = eq === -1 ? undefined : a.slice(eq + 1).replaceAll('"', '').replaceAll("'", '')
-                const last = code[tag].length - 1
 
-                // fetching method: async / defer 
-                if (tag === 'script' && ['defer', 'async'].includes(name)) code[tag][last].load = name
+                if (multi) {
 
-                // preload hint 
-                if (['script', 'style'].includes(tag) && name === 'preload') code[tag][last].preload = true
+                    // fetching method: async / defer 
+                    if (tag === 'script' && ['defer', 'async'].includes(name)) codeSlice.load = name
 
-                // Styles visible en premier
-                if (tag === 'style' && name === 'first') code[tag][last].first = true
+                    // preload hint 
+                    if (['script', 'style'].includes(tag) && name === 'preload') codeSlice.preload = true
 
-                // Assigner un nom de fichier spécifique
-                if (['script', 'style'].includes(tag) && name === 'filename') code[tag][last].file = name
+                    // Styles visible en premier
+                    if (tag === 'style' && name === 'first') codeSlice.first = true
+
+                    // Assigner un nom de fichier spécifique
+                    if (['script', 'style'].includes(tag) && name === 'filename') codeSlice.file = value
 
 
-                // Contenu à importer depuis un fichier externe
-                if (['script', 'style'].includes(tag) && name === 'import') {
-                    const toImport = `${path}/${value}`
-                     
-                    const importedFile = await fs.readFile(toImport, { encoding: 'utf-8' })
-                        .catch(e => exit(`can't read the file ${toImport} !`, e))
+                    // Contenu à importer depuis un fichier externe
+                    if (['script', 'style'].includes(tag) && name === 'import') {
+                        const toImport = `${path}/${value}`
                         
-                    if (importedFile) {
-                        
-                        let concat = true
+                        const importedFile = await fs.readFile(toImport, { encoding: 'utf-8' })
+                            .catch(e => exit(`can't read the file ${toImport} !`, e))
+                            
+                        if (importedFile) {
+                            if (!codeSlice.file) codeSlice.file = value
+                            let concat = true
 
-                        // Si une fonction vide nommée « script${name} » existe, on la remplace par le contenu de la balise SCRIPT
-                        if (tag === 'script') {
-                            const asideScript = `function script${name}() {}`
-                            const idx = importedFile.indexOf(asideScript)
-                            if (idx > -1) {
-                                code[tag][last].content = importedFile.slice(0, idx + asideScript.length - 1)
-                                                        + `\n${code[tag][last].content}\n`
-                                                        + importedFile.slice(idx + asideScript.length - 1)
-                                concat = false
+                            // Si une fonction vide nommée « script${name} » existe, on la remplace par le contenu de la balise SCRIPT
+                            if (tag === 'script') {
+                                const asideScript = `function script${name}() {}`
+                                const idx = importedFile.indexOf(asideScript) === -1
+                                if (idx > -1) {
+                                    codeSlice.content = importedFile.slice(0, idx + asideScript.length - 1)
+                                                            + `\n${codeSlice.content}\n`
+                                                            + importedFile.slice(idx + asideScript.length - 1)
+                                    concat = false
+                                }
+                            }
+
+                            // Sinon on concatène la partie inline après le fichier importé
+                            if (concat) {
+                                codeSlice.content = `${importedFile}\n${codeSlice.content}`
                             }
                         }
-
-                        // Sinon on concatène la partie inline après le fichier importé
-                        if (concat) {
-                            code[tag][last].content = `${importedFile}\n${code[tag][last].content}`
-                        }
-                    }
-                }   
+                    }   
+                }
             }
-        }
-        else code[tag] = ''
-    }
-    if (!foundRequired) throw new Error(`> compile ${name} : Not found any of one of required tags: <TEMPLATE></TEMPLATE>, <STYLE></STYLE> or <SCRIPT></SCRIPT> (case sensitive)`)
 
+            // Retente une recherche d'un autre tag similaire
+            if (multi) nextOnlyTags.push({ tag, start: sectionStop + tag.length })
+        }
+
+    }
+    if (!foundRequired && !onlyTag) throw new Error(`> compile ${name} : Not found any of one of required tags: <TEMPLATE></TEMPLATE>, <STYLE></STYLE> or <SCRIPT></SCRIPT> (case sensitive)`)
+
+
+    for (const next of nextOnlyTags) {
+        sections(path, name, file, next.start, next.tag)
+    }
 }
 
 
