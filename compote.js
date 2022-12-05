@@ -388,7 +388,6 @@ async function server(request, response) {
         // const typePath = config.paths[`dist_${type}`].slice(config.paths.dist)
         const typePath = config.paths[`dist_${type}`]
         const relativePath = filePath.slice(config.paths.public.length)
-        console.log({ typePath, relativePath })
         if (!relativePath.startsWith(typePath)) continue
         
         const componentName = relativePath.split('/').at(-1).split('.').at(0)
