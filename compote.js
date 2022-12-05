@@ -37,6 +37,8 @@ const defaultOptions = {
 
         // Injection du slot
         slot:       '…',                // <MonComposant>le slot ici {…MonComposant}</MonComposant>
+
+        hashed_filename: '___',         // style___xLker.css
     },
     behavior: {
         encode: {
@@ -390,12 +392,12 @@ async function server(request, response) {
         const relativePath = filePath.slice(config.paths.public.length)
         if (!relativePath.startsWith(typePath)) continue
         
-        const componentName = relativePath.split('/').at(-1).split('.').at(0)
+        const componentName = relativePath.split('/').at(-1).slice(0, -1 * extname.length)//.split('.').at(0)
 
         // TODO : vérifier qu'il s'agit d'un composant réel (pour éviter la colision avec un script externe commençant par une majuscule)
         if (componentName.at(0) < 'A' || componentName.at(0) > 'Z') continue
 
-        filePath = `${config.paths.compiled}/${componentName}${extname}`        
+        filePath = `${config.paths.compiled}/${componentName}${extname}`
         console.log('Re-routed', type, filePath)
     }
     fsSync.readFile(filePath, function(error, content) {
@@ -893,7 +895,7 @@ Developement:
                     // Hard link pour la version hashée 
                     if (config.options.hashed_filenames) {
                         const lastDot = a.file.lastIndexOf('.')
-                        a.file_hash = `${a.file.slice(0, lastDot)}.${a.hash}.${a.file.slice(lastDot + 1)}`
+                        a.file_hash = `${a.file.slice(0, lastDot)}${config.syntax.hashed_filename}${a.hash}.${a.file.slice(lastDot + 1)}`
                         await fs.link(`${outputPath}/${assetFile}`,`${outputPath}/${a.file_hash}`)
                             .catch(e => {
                                 if (e.code === 'EEXIST') return
@@ -1225,7 +1227,7 @@ async function sections(path, component, file, start=0, onlyTag) {
 
                 const eq = a.indexOf('=')
                 const name = eq === -1 ? a : a.slice(0, eq)
-                const value = eq === -1 ? undefined : a.slice(eq + 1).replaceAll('"', '').replaceAll("'", '')
+                let value = eq === -1 ? undefined : a.slice(eq + 1).replaceAll('"', '').replaceAll("'", '')
 
                 if (multi) {
 
@@ -1238,9 +1240,6 @@ async function sections(path, component, file, start=0, onlyTag) {
 
                     // Spécifique aux styles
                     if (tag === 'style') {
-
-                        // Styles au-dessus de la ligne de flotaison (si l'on souhaite chargé en priorité ceux-là et en asynchrone les autres styles) 
-                        if (name === 'above-the-fold') slice.aboveTheFold = true
 
                         if (name === 'scoped') slice.scoped = true
 
@@ -1259,6 +1258,17 @@ async function sections(path, component, file, start=0, onlyTag) {
 
                         // Code à importer depuis un fichier externe
                         if (name === 'import') {
+
+                            // Remplace une variable d'environnement
+                            const idxEnvStart = value.indexOf('{')
+                            if (idxEnvStart > -1) {
+                                const idxEnvEnd = value.indexOf('}', idxEnvStart)
+                                if (idxEnvEnd > -1) {
+                                    const name = value.slice(idxEnvStart + 1, idxEnvEnd)
+                                    if (name in process.env) value = value.replace(`{${name}}`, process.env[name])
+                                }
+                            }
+
                             const toImport = `${path}/${value}`
                             
                             const importedFile = await fs.readFile(toImport, { encoding: 'utf-8' })
@@ -1548,7 +1558,6 @@ async function compileTemplate(start, stop, depth=0, parentTag='') {
                     closer: idxExpressionCloser,
                 },
             },
-
             closer: idxExpressionCloser,
         },
 
@@ -1604,7 +1613,7 @@ async function compileTemplate(start, stop, depth=0, parentTag='') {
 
                 // Element sans enfant
                 if (n.tag._1st._key === 'closingElement') {
-                    const [ attributes, conditions ] = await attributesAndConditions(n.tag.$, n.tag.closingElement._, n.tag.closingElement['…'], n._1st._key)
+                    const [ attributes, conditions, preserveSlot ] = await attributesAndConditions(n.tag.$, n.tag.closingElement._, n.tag.closingElement['…'], n._1st._key)
                     push([
                         {   
                             _: tag, 
@@ -1626,8 +1635,11 @@ async function compileTemplate(start, stop, depth=0, parentTag='') {
                     n.closingTag = n.tag.closingOpenTag.closer
                     // n.closingTag.$ = n.closingTag._ + n.tag['…'].length + '/<'.length
                     const [ slotStart, slotEnd ] = [ n.tag.closingOpenTag.$, n.closingTag.$ ]
-                    const slot = await compileTemplate(slotStart, slotEnd, depth + 1, tag)
-                    const [ attributes, conditions ] = await attributesAndConditions(n.tag.$, n.tag.closingOpenTag._, n.tag.closingOpenTag['…'], n._1st._key)
+
+                    const [ attributes, conditions, preserveSlot ] = await attributesAndConditions(n.tag.$, n.tag.closingOpenTag._, n.tag.closingOpenTag['…'], n._1st._key)
+
+                    const slot = preserveSlot ? [ code.template.slice(slotStart, slotEnd) ]
+                                              : await compileTemplate(slotStart, slotEnd, depth + 1, tag)
                     push([
                         { 
                             _: tag,
@@ -1703,7 +1715,7 @@ async function compileTemplate(start, stop, depth=0, parentTag='') {
                         push([_for, [] ])
                         start = n.expression.for.type.closer.$
                         continue
-
+                    
 
                     default: // Valeur ou code javascript
                         if (!(n.expression.closer?._ > -1)) {
@@ -1773,12 +1785,16 @@ async function attributesAndConditions(start, stop, closer, type) {
             _: "{if ",
             end: idxExpressionCloser,
         },
+        preserve: {
+            _: "{preserve",
+            end: idxExpressionCloser,
+        },
         expression: {
             _: "{",
             end: idxExpressionCloser,
         },
-
      }
+     let preserveSlot = false
 
      const attrExpression = async (from, attribute) => {
 
@@ -1836,6 +1852,12 @@ async function attributesAndConditions(start, stop, closer, type) {
             start = n._1st.end.$
         }
 
+        else if ('preserve' in n) {
+            console.log('preserve slot')
+            preserveSlot = true
+            start = n._1st.end.$
+        }
+
         // Attribut booléen sans valeur
         else {     
             const end = n._1st._ > -1 ? n._1st : { _: stop, $: stop }
@@ -1860,7 +1882,7 @@ async function attributesAndConditions(start, stop, closer, type) {
     }
     if (closer[0] === '/') attributes['/'] = 1
     conditions.reverse()
-    return [ attributes, conditions ]
+    return [ attributes, conditions, preserveSlot ]
 }
 
 
