@@ -554,9 +554,9 @@ async function initProject() {
             "src": "./src/components",
             "compiled": "./.compote/compiled",
             "public": "./public",
-            "public_scripts": "./public/js",
-            "public_styles": "./public/css",
             "dist": "./dist",
+            "dist_scripts": "./js",
+            "dist_styles": "./css",
             "cache": "./.compote/cache"
         },
         "routes": [
@@ -564,7 +564,7 @@ async function initProject() {
             { "match": 404, "page": "NotFoundPage", "args": [ "path", "query" ] }
         ],
         "options": {
-            "hash_files": "js,css",
+            "hashed_filenames": true,
             "headers": {
                 "Content-Security-Policy": "report-uri /.well-known/compote; {CSP}"
             }
@@ -883,13 +883,19 @@ Developement:
                         .catch(e => exit(`can't write the asset file ${outputPath}/${assetFile} !`, e))
                     a.file = assetFile
                     Object.assign(a, await integrity(a.content))
-                    const lastDot = a.file.lastIndexOf('.')
-                    a.file_hash = `${a.file.slice(0, lastDot)}.${a.hash}.${a.file.slice(lastDot + 1)}`
-                    await fs.link(`${outputPath}/${assetFile}`,`${outputPath}/${a.file_hash}`)
-                        .catch(e => {
-                            if (e.code === 'EEXIST') return
-                            exit(`can't write the asset hashed filename link ${outputPath}/${a.hash_file} !`, e)
-                        })
+
+                    // Hard link pour la version hashée 
+                    if (config.options.hashed_filenames) {
+                        const lastDot = a.file.lastIndexOf('.')
+                        a.file_hash = `${a.file.slice(0, lastDot)}.${a.hash}.${a.file.slice(lastDot + 1)}`
+                        await fs.link(`${outputPath}/${assetFile}`,`${outputPath}/${a.file_hash}`)
+                            .catch(e => {
+                                if (e.code === 'EEXIST') return
+                                exit(`can't write the asset hashed filename link ${outputPath}/${a.hash_file} !`, e)
+                            })
+                    }
+                    else a.file_hash = a.file
+
                     delete a.content
                 }
             }
@@ -956,6 +962,10 @@ Developement:
     if ((options.includes('--build-pages') || options.includes('--dist'))
     && !options.includes('--bypass-build')) {
 
+        // Supprime les anciens fichiers compilés (notamment pour les noms de fichiers avec hashage)
+        await fs.rm(config.paths.compiled, { recursive: true })
+        await fs.mkdir(config.paths.compiled)
+
         // Compile l'ensemble des components
         if (options.includes('--dist') && !options.includes('--bypass-compile')) {
             await compote([ '--compile', srcPath, compiledPath ])
@@ -1013,6 +1023,15 @@ Developement:
         }
         else await fs.mkdir(prefix, { recursive: true })
 
+        const assets = {}
+        const asset_file = config.options.hashed_filenames ? 'file_hash' : 'file' 
+        for (const assetType of ['script', 'style']) {
+            const distAsset = addPaths(prefix, config.paths[`dist_${assetType}s`])
+            if (!fsSync.existsSync(distAsset)) {
+                await fs.mkdir(distAsset, { recursive: true })
+            }
+        }
+
         for (const page of pages) {
             
             const Component = (await import(`${compiledFullPath}/${page}`)).default
@@ -1025,6 +1044,20 @@ Developement:
             ]
             state.components = await Compote.loadDependencies(Component, state.allComponents, true, compiledFullPath)
             console.log(`${page} ${routes.length}x... => ${prefix}`)
+
+            // Copie les assets
+            for (const cp in state.components) {
+                for (const assetType of ['script', 'style']) {
+                    for (const a of state.components[cp].___[assetType]) {
+                        if (assets[a[asset_file]]) continue
+                        assets[a[asset_file]] = true
+
+                        const from = addPaths(config.paths.compiled, a[asset_file])
+                        const to = addPaths(prefix, config.paths[`dist_${assetType}s`], a[asset_file])
+                        fs.copyFile(from, to)
+                    }
+                }
+            }
 
             for (const route of routes) {    
 
