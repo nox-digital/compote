@@ -385,11 +385,18 @@ async function server(request, response) {
     }
     for (const type in exportedFiles) {
         if (contentType !== exportedFiles[type]) continue
-        const typePath = config.paths[`public_${type}`]
-        if (!filePath.startsWith(typePath)) continue
-        const componentName = filePath.slice(typePath.length + 1, extname.length * -1)
+        // const typePath = config.paths[`dist_${type}`].slice(config.paths.dist)
+        const typePath = config.paths[`dist_${type}`]
+        const relativePath = filePath.slice(config.paths.public.length)
+        console.log({ typePath, relativePath })
+        if (!relativePath.startsWith(typePath)) continue
+        
+        const componentName = relativePath.split('/').at(-1).split('.').at(0)
+
+        // TODO : vérifier qu'il s'agit d'un composant réel (pour éviter la colision avec un script externe commençant par une majuscule)
         if (componentName.at(0) < 'A' || componentName.at(0) > 'Z') continue
-        filePath = `${config.paths.compiled}/${componentName}${extname}`
+
+        filePath = `${config.paths.compiled}/${componentName}${extname}`        
         console.log('Re-routed', type, filePath)
     }
     fsSync.readFile(filePath, function(error, content) {
