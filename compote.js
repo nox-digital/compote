@@ -224,7 +224,6 @@ const configFile = async () => {
             process.exit(1)
         }
     }
-
     return
 }
 
@@ -971,8 +970,10 @@ Developement:
     && !options.includes('--bypass-build')) {
 
         // Supprime les anciens fichiers compilés (notamment pour les noms de fichiers avec hashage)
-        await fs.rm(config.paths.compiled, { recursive: true })
-        await fs.mkdir(config.paths.compiled)
+        if (options.includes('--clean')) {
+            await fs.rm(config.paths.compiled, { recursive: true })
+            await fs.mkdir(config.paths.compiled)
+        }
 
         // Compile l'ensemble des components
         if (options.includes('--dist') && !options.includes('--bypass-compile')) {
@@ -1259,20 +1260,26 @@ async function sections(path, component, file, start=0, onlyTag) {
                         // Code à importer depuis un fichier externe
                         if (name === 'import') {
 
-                            // Remplace une variable d'environnement
+                            let toImportPath = path
+
+                            // Remplace une variable d'environnement (ou par {COMPILED} pour le dossier des composants compilés)
                             const idxEnvStart = value.indexOf('{')
                             if (idxEnvStart > -1) {
                                 const idxEnvEnd = value.indexOf('}', idxEnvStart)
                                 if (idxEnvEnd > -1) {
                                     const name = value.slice(idxEnvStart + 1, idxEnvEnd)
-                                    if (name in process.env) value = value.replace(`{${name}}`, process.env[name])
+                                    if (name === 'COMPILED') {
+                                        toImportPath = config.paths.compiled
+                                        value = value.slice(idxEnvEnd + 1)
+                                    }
+                                    else if (name in process.env) value = value.replace(`{${name}}`, process.env[name])
                                 }
                             }
 
-                            const toImport = `${path}/${value}`
+                            const toImport = addPaths(toImportPath, value)
                             
                             const importedFile = await fs.readFile(toImport, { encoding: 'utf-8' })
-                                .catch(e => exit(`can't read the file ${toImport} !`, e))
+                                .catch(e => console.warn(`can't read the file ${toImport} !`, e))
                                 
                             if (importedFile) {
                                 if (!slice.file) slice.file = value
@@ -1293,7 +1300,8 @@ async function sections(path, component, file, start=0, onlyTag) {
 
                                 // Sinon on concatène la partie inline après le fichier importé
                                 if (concat) {
-                                    slice.content = `${importedFile}\n${slice.content}`
+                                    const separator = tag === 'script' ? ';\n\n' : '\n\n'
+                                    slice.content = `${importedFile}${separator}${slice.content}`
                                 }
                             }
                         }   
