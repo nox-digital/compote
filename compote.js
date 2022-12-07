@@ -571,6 +571,7 @@ async function initProject() {
             { "match": 404, "page": "NotFoundPage", "args": [ "path", "query" ] }
         ],
         "options": {
+            "minify": false,
             "hashed_filenames": true,
             "headers": {
                 "Content-Security-Policy": "report-uri /.well-known/compote; {CSP}"
@@ -882,14 +883,12 @@ Developement:
                     let assetFile = a.file || `${name}${++i > 1 ? i : ''}.${ext}`
     
                     // Si l'option "minimize" est activée
-                    if (config.options[`minify_${ext}`]) {
-                        // TODO: assetFile = ...
-                    }
+                    const minified = app.minify ? app.minify(assetFile, ext === 'css' ? 'style' : 'script', a.content) : a.content
     
-                    await fs.writeFile(`${outputPath}/${assetFile}`, a.content)
+                    await fs.writeFile(`${outputPath}/${assetFile}`, minified)
                         .catch(e => exit(`can't write the asset file ${outputPath}/${assetFile} !`, e))
                     a.file = assetFile
-                    Object.assign(a, await integrity(a.content))
+                    Object.assign(a, await integrity(minified))
 
                     // Hard link pour la version hashée 
                     if (config.options.hashed_filenames) {
@@ -1169,9 +1168,6 @@ Developement:
 }
 
 
-
-
-
 async function sections(path, component, file, start=0, onlyTag) {
 
     const tags = {
@@ -1256,52 +1252,45 @@ async function sections(path, component, file, start=0, onlyTag) {
                         // Assigner un nom de fichier spécifique
                         if (name === 'filename') slice.file = value
 
+                        // Positionne explicitement quand include la partie inline (utile en cas d'import)
+                        if (name === 'inline') {
+
+                        }
 
                         // Code à importer depuis un fichier externe
                         if (name === 'import') {
 
+                            // Nom par défaut du script si aucun contenu inline et aucun nom défini
+                            if (!slice.content && !slice.file) slice.file = value.split('/').at(-1)
                             let toImportPath = path
 
-                            // Remplace une variable d'environnement (ou par {COMPILED} pour le dossier des composants compilés)
+                            // Remplace une variable d'environnement
                             const idxEnvStart = value.indexOf('{')
                             if (idxEnvStart > -1) {
                                 const idxEnvEnd = value.indexOf('}', idxEnvStart)
                                 if (idxEnvEnd > -1) {
                                     const name = value.slice(idxEnvStart + 1, idxEnvEnd)
-                                    if (name === 'COMPILED') {
-                                        toImportPath = config.paths.compiled
-                                        value = value.slice(idxEnvEnd + 1)
-                                    }
-                                    else if (name in process.env) value = value.replace(`{${name}}`, process.env[name])
+                                    if (name in process.env) value = value.replace(`{${name}}`, process.env[name])
+                                    else throw Error(`Environment variable « ${name} » not found. Can't create the file ${value} from ${component}`)
                                 }
+                            }
+
+                            // Si le 1er caractère est « * » on préfixe par le dossier des composants compilés dynamiquement
+                            if (value.at(0) === '*') {
+                                toImportPath = config.paths.compiled
+                                value = value.slice(1)
                             }
 
                             const toImport = addPaths(toImportPath, value)
                             
                             const importedFile = await fs.readFile(toImport, { encoding: 'utf-8' })
-                                .catch(e => console.warn(`can't read the file ${toImport} !`, e))
+                                .catch(e => console.warn(`can't import the file ${toImport} !`, e))
                                 
                             if (importedFile) {
-                                if (!slice.file) slice.file = value
-                                let concat = true
-
-                                // Si une fonction vide nommée « script${component} » existe, on la remplace par le contenu de la balise SCRIPT
-                                if (tag === 'script') {
-                                    const asideScript = `function script${component}() {}`
-                                    const idx = importedFile.indexOf(asideScript)
-                                    if (idx > -1) {
-                                        // slice.content = slice.content.replace(asideScript, `function script${component} {\n${slice.content}\n}`)
-                                        slice.content = importedFile.slice(0, idx + asideScript.length - 1)
-                                                                + `\n${slice.content}\n`
-                                                                + importedFile.slice(idx + asideScript.length - 1)
-                                        concat = false
-                                    }
-                                }
-
-                                // Sinon on concatène la partie inline après le fichier importé
-                                if (concat) {
-                                    const separator = tag === 'script' ? ';\n\n' : '\n\n'
-                                    slice.content = `${importedFile}${separator}${slice.content}`
+                                const separator = tag === 'script' ? ';\n\n' : '\n\n'
+                                slice.content += `${separator}${importedFile}`
+                                if (component === 'Page') {
+                                    console.log(`+++ ${importedFile}`)
                                 }
                             }
                         }   
@@ -1317,11 +1306,20 @@ async function sections(path, component, file, start=0, onlyTag) {
         }
 
     }
+
     if (!foundRequired && !onlyTag) throw new Error(`> compile ${component} : Not found any of one of required tags: <TEMPLATE></TEMPLATE>, <STYLE></STYLE> or <SCRIPT></SCRIPT> (case sensitive)`)
 
 
     for (const next of nextOnlyTags) {
         sections(path, component, file, next.start, next.tag)
+        /*
+        for (const n of code[next.tag]) {
+            if (!n.file) {
+                console.warn(`missing a filename for <${next.tag.toUpperCase()}> of ${component}`)
+            }
+            else console.log('........', n.file)
+        }
+        */
     }
 }
 
@@ -2301,6 +2299,9 @@ var copy = ((srcpath, destpath) => {
 const start = async () => {
     await envFile('.env')
     await configFile()
+    if (config.options.minify) {
+        app.minify = (await import(`${cwd}/${config.options.minify}`)).minify
+    }
     compote(process.argv.slice(2))
 }
 start()
