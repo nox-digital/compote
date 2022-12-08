@@ -1194,11 +1194,17 @@ async function sections(path, component, file, start=0, onlyTag) {
     let foundRequired = 0    
     for (const tag of Object.keys(tags)) {
 
-        const multi = ['script', 'style'].includes(tag)
-        if (multi) {
+        const multiParts = ['script', 'style', ].includes(tag)
+        const multiTag = ['script', 'style'].includes(tag)
+        /*
+        if (multiTag) {
             if (!Array.isArray(code[tag])) code[tag] = []
         }
         else code[tag] = ''
+        */
+
+        const tags = []
+
 
         const found = next[tag] && next[tag]._ > -1
 
@@ -1206,103 +1212,116 @@ async function sections(path, component, file, start=0, onlyTag) {
             if (!(next[tag].closingOpenTag?.closer?._ > -1)) throw new Error(`> compile ${component} - ERROR: not found the closing tag </${tag.toUpperCase()}> (case sensitive)`)
             if (atLeast.includes(tag)) foundRequired++
 
-            // Extrait le code et enlève le 1er et dernier saut de ligne à l'intérieur si nécessaire
+            // Extrait la partie inline et enlève le 1er et dernier saut de ligne à l'intérieur si nécessaire
             const sectionStart = next[tag].closingOpenTag.$
             const sectionStop = next[tag].closingOpenTag.closer._
-            let slice = {
-                content: file.slice(
-                    sectionStart + (file.at(sectionStart) === "\n" ? 1 : 0), 
-                    sectionStop - (file.at(sectionStop - 1) === "\n" ? 1 : 0))
-            }
-            if (multi) code[tag].push(slice)
-            else code[tag] = slice.content
+            const inlinePart = file.slice(
+                sectionStart + (file.at(sectionStart) === "\n" ? 1 : 0), 
+                sectionStop - (file.at(sectionStop - 1) === "\n" ? 1 : 0))
+
+            const parts = []
+            let slice = {}
+            // if (multiTag) code[tag].push(slice)
+            // else code[tag] = ''
 
 
             // Analyse les attributs
             const attributes = file.slice(next[tag].$, next[tag].closingOpenTag._).trim().split(' ')
+            let inlinePartAdded = false
             for (const a of attributes) {
 
                 const eq = a.indexOf('=')
                 const name = eq === -1 ? a : a.slice(0, eq)
                 let value = eq === -1 ? undefined : a.slice(eq + 1).replaceAll('"', '').replaceAll("'", '')
 
-                if (multi) {
 
-                    // Spécifique aux scripts
-                    if (tag === 'script') {
+                // Spécifique aux scripts
+                if (tag === 'script') {
 
-                        // fetching method: async / defer 
-                        if (['defer', 'async'].includes(name)) slice[name] = true
+                    // fetching method: async / defer 
+                    if (['defer', 'async'].includes(name)) slice[name] = true
+                }
+
+                // Spécifique aux styles
+                if (tag === 'style') {
+
+                    // Préfixer chaque règles de styles par le préfixe indiqué: scoped=#comp  ( p { ... } => #comp p { ... } )
+                    if (name === 'scoped') slice.scoped = value
+
+                    if (name === 'defer') slice.defer = true 
+                }
+
+                // Spécifiques aux scripts/styles
+                if (['script', 'style'].includes(tag)) {
+
+                    // preload hint 
+                    if (name === 'preload') slice.preload = true
+
+                    // Assigner un nom de fichier spécifique
+                    if (name === 'filename') slice.file = value
+
+                }
+
+                // Spécifiques au multiparts 
+                if (multiParts) {
+
+                    // Positionne explicitement quand include la partie inline (utile en cas d'import)
+                    if (name === 'inline') {
+                        inlinePartAdded = true
                     }
 
-                    // Spécifique aux styles
-                    if (tag === 'style') {
+                    // Code à importer depuis un fichier externe
+                    if (name === 'import') {
 
-                        if (name === 'scoped') slice.scoped = true
+                        // Nom par défaut du script si aucun contenu inline et aucun nom défini
+                        if (!inlinePart && !slice.file) slice.file = value.split('/').at(-1)
+                        let toImportPath = path
 
-                        if (name === 'defer') slice.defer = true 
-                    }
-
-                    // Spécifiques aux scripts/styles
-                    if (['script', 'style'].includes(tag)) {
-
-                        // preload hint 
-                        if (name === 'preload') slice.preload = true
-
-                        // Assigner un nom de fichier spécifique
-                        if (name === 'filename') slice.file = value
-
-                        // Positionne explicitement quand include la partie inline (utile en cas d'import)
-                        if (name === 'inline') {
-
+                        // Remplace une variable d'environnement
+                        const idxEnvStart = value.indexOf('{')
+                        if (idxEnvStart > -1) {
+                            const idxEnvEnd = value.indexOf('}', idxEnvStart)
+                            if (idxEnvEnd > -1) {
+                                const name = value.slice(idxEnvStart + 1, idxEnvEnd)
+                                if (name in process.env) value = value.replace(`{${name}}`, process.env[name])
+                                else throw Error(`Environment variable « ${name} » not found. Can't create the file ${value} from ${component}`)
+                            }
                         }
 
-                        // Code à importer depuis un fichier externe
-                        if (name === 'import') {
+                        // Si le 1er caractère est « * » on préfixe par le dossier des composants compilés dynamiquement
+                        if (value.at(0) === '*') {
+                            toImportPath = config.paths.compiled
+                            value = value.slice(1)
+                        }
 
-                            // Nom par défaut du script si aucun contenu inline et aucun nom défini
-                            if (!slice.content && !slice.file) slice.file = value.split('/').at(-1)
-                            let toImportPath = path
-
-                            // Remplace une variable d'environnement
-                            const idxEnvStart = value.indexOf('{')
-                            if (idxEnvStart > -1) {
-                                const idxEnvEnd = value.indexOf('}', idxEnvStart)
-                                if (idxEnvEnd > -1) {
-                                    const name = value.slice(idxEnvStart + 1, idxEnvEnd)
-                                    if (name in process.env) value = value.replace(`{${name}}`, process.env[name])
-                                    else throw Error(`Environment variable « ${name} » not found. Can't create the file ${value} from ${component}`)
-                                }
-                            }
-
-                            // Si le 1er caractère est « * » on préfixe par le dossier des composants compilés dynamiquement
-                            if (value.at(0) === '*') {
-                                toImportPath = config.paths.compiled
-                                value = value.slice(1)
-                            }
-
-                            const toImport = addPaths(toImportPath, value)
-                            
-                            const importedFile = await fs.readFile(toImport, { encoding: 'utf-8' })
-                                .catch(e => console.warn(`can't import the file ${toImport} !`, e))
-                                
-                            if (importedFile) {
-                                const separator = tag === 'script' ? ';\n\n' : '\n\n'
-                                slice.content += `${separator}${importedFile}`
-                                if (component === 'Page') {
-                                    console.log(`+++ ${importedFile}`)
-                                }
-                            }
-                        }   
-
-
-                    }
-
+                        const toImport = addPaths(toImportPath, value)
+                        
+                        const importedFile = await fs.readFile(toImport, { encoding: 'utf-8' })
+                            .catch(e => console.warn(`can't import the file ${toImport} !`, e))
+                        if (importedFile) parts.push(importedFile)
+                        else console.warn(`Empty imported file ${importedFile}`)
+                    }   
                 }
             }
 
+
+            // Ajoute le code inline si cela n'a pas été explicitement déjà demandé
+            if (!inlinePartAdded) parts.push(inlinePart)
+            
+            // Assemble les différentes parties inlines/import
+            slice.content = parts.join(tag === 'script' ? ';\n\n' : '\n\n')
+            parts.length = 0
+
+            if (multiTag) {
+                if (!Array.isArray(code[tag])) code[tag] = []
+                code[tag].push(slice)
+            }
+            else code[tag] = slice.content
+
+
             // Retente une recherche d'un autre tag similaire
-            if (multi) nextOnlyTags.push({ tag, start: sectionStop + tag.length })
+            if (multiTag) nextOnlyTags.push({ tag, start: sectionStop + tag.length })
+
         }
 
     }
@@ -1311,15 +1330,7 @@ async function sections(path, component, file, start=0, onlyTag) {
 
 
     for (const next of nextOnlyTags) {
-        sections(path, component, file, next.start, next.tag)
-        /*
-        for (const n of code[next.tag]) {
-            if (!n.file) {
-                console.warn(`missing a filename for <${next.tag.toUpperCase()}> of ${component}`)
-            }
-            else console.log('........', n.file)
-        }
-        */
+        await sections(path, component, file, next.start, next.tag)
     }
 }
 
