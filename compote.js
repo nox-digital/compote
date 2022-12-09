@@ -13,6 +13,7 @@ import crypto from 'crypto'
 const customInspectSymbol = Symbol.for('nodejs.util.inspect.custom')
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
+const c = console
 
 const cwd = process.cwd()
 const app = {
@@ -575,8 +576,11 @@ async function initProject() {
             "hashed_filenames": true,
             "headers": {
                 "Content-Security-Policy": "report-uri /.well-known/compote; {CSP}"
-            }
-        }       
+            },
+            "sitemap": {
+                "index": "sitemap.xml"
+            }    
+        }
     }
     const defaultConfigString = JSON.stringify(defaultConfig, null, 2)
     for (const p in defaultConfig.paths) {
@@ -1040,6 +1044,37 @@ Developement:
             }
         }
 
+        // Sitemap
+        const sm = config.options.sitemap.index ? {
+            index: config.options.sitemap.index,
+            nbFiles: 0,
+            nbURLs: 0,
+            maxURLs: 50000,
+            size: 0,
+            maxSize: 50 * 1000 * 1000,
+            fh: null,
+            fhN: null,
+            now: new Date().toISOString(),
+            nextSitemapFile: async (reason) => {
+                const filename = sm.index.replace('.xml', `-${++sm.nbFiles}.xml`)
+                if (sm.fhN !== null) {
+                    await sm.fhN.appendFile(`\n</urlset>`)
+                    await sm.fhN.close()
+                }
+                sm.fhN = await fs.open(addPaths(config.paths.dist, filename), 'a')
+                await sm.fhN.appendFile(`<urlset>`)
+                await sm.fh.appendFile(`\n<sitemap><loc>https://${process.env.PUBLIC_DOMAIN}/${filename}</loc><lastmod>${sm.now}</lastmod></sitemap>`)
+                sm.size = Buffer.byteLength(`<urlset>\n</urlset>`, 'utf-8')
+                sm.nbURLs = 0
+                c.log(`> new sitemap file ${filename} (reason: ${reason})`)
+            },
+        } : false
+
+        if (sm) {
+            sm.fh = await fs.open(addPaths(config.paths.dist, sm.index), 'a')
+            await sm.fh.appendFile(`<sitemapindex>`)
+            await sm.nextSitemapFile('initialisation')
+        }
         for (const page of pages) {
             
             const Component = (await import(`${compiledFullPath}/${page}`)).default
@@ -1052,6 +1087,7 @@ Developement:
             ]
             state.components = await Compote.loadDependencies(Component, state.allComponents, true, compiledFullPath)
             console.log(`${page} ${routes.length}x... => ${prefix}`)
+
 
             // Copie les assets
             for (const cp in state.components) {
@@ -1083,7 +1119,8 @@ Developement:
                 }
 
                 const routePath = route.path === '/index.html' ? '' : route.path
-                state.canonical = process.env.PUBLIC_DOMAIN ? `https://${process.env.PUBLIC_DOMAIN}${routePath}` : routePath
+                const canonical = process.env.PUBLIC_DOMAIN ? `https://${process.env.PUBLIC_DOMAIN}${routePath}` : routePath
+                state.canonical = canonical
                 const component = new Component(Compote, state, route.params) //{ state: state, attributes: route.params, props: route.props })
                 output = await Compote.build(state, component, undefined, true)
                 nbCharacters += output.length
@@ -1091,7 +1128,36 @@ Developement:
                 if (options.includes('--progress')) console.log(`${Math.round(output.length / 1024)}KB ${filepath}`)
                 await fs.writeFile(filepath + (isDir ? '/index.html' : ''), output)
 
+
+                // Sitemap
+                if (sm && !route.nositemap && !page.nositemap) {
+                    let image = ''
+                    if (image) {
+                        // sm.img = `<image:image><image:loc>https://${process.env.PUBLIC_DOMAIN}${image.url}</image:loc><image:title>${image.title}</image:title></image:image>`
+                    }
+                    const smURL = `\n<url><loc>${canonical}</loc><changefreq>${route.changefreq ?? 'weekly'}</changefreq><priority>${route.priority ?? '1'}</priority>${image}</url>`
+                    const bytes = Buffer.byteLength(smURL, `utf-8`)
+
+                    let newFile = false
+                    if ((sm.nbURLs + 1) >= sm.maxURLs) newFile = `(${sm.nbURLs + 1} URLs`
+                    else if ((sm.size + bytes) >= sm.maxSize) newFile = `(${sm.size} + ${bytes} bytes >= ${sm.maxSize}) bytes`
+                    if (newFile) await sm.nextSitemapFile(newFile)
+
+                    sm.size += bytes
+                    sm.nbURLs++
+                    await sm.fhN.appendFile(smURL)
+                }
+
             }
+        }
+
+        // Ferme les fichiers sitemap
+        if (sm) {
+            await sm.fhN.appendFile(`\n</urlset>`)
+            await sm.fhN.close()
+            await sm.fh.appendFile(`\n</sitemapindex>`)
+            await sm.fh.close()
+            c.log(`${sm.nbFiles} sitemap files`)
         }
 
         const deltaTime = new Date() - startTime
@@ -1166,7 +1232,6 @@ Developement:
     }
     
 }
-
 
 async function sections(path, component, file, start=0, onlyTag) {
 
