@@ -17,7 +17,7 @@ const c = console
 
 const cwd = process.cwd()
 const app = {
-    devMode: false,
+    dev: false,
 }
 
 
@@ -54,10 +54,17 @@ const defaultOptions = {
         cache: './.compote/cache',
         public: './public',
     },
-    server: {
+    dev: {
         port: 8080,
+        routes: [],
     },
-    routes: [],
+    options: {
+        minify: false,
+        hashed_filename: true,
+        sitemap: {
+            index: 'sitemap.xml'
+        }
+    }
 }
 const compiled = {}
 const code = {}
@@ -187,11 +194,11 @@ const configFile = async () => {
             config.paths = conf.paths
         }
 
-        if ('routes' in conf) {
-            for (const r of conf.routes) {
+        if ('dev' in conf) {
+            config.dev = conf.dev
+            for (const r of config.dev.routes) {
                 if (typeof r.match === 'string') r.match = new RegExp(r.match)
             }
-            config.routes = conf.routes
         }
 
         if ('syntax' in conf) {
@@ -214,14 +221,13 @@ const configFile = async () => {
     }
 
     // import custom functions
-    if ('functions' in conf) {
+    if (config.options.functions) {
         try {
-            console.log(`loading custom function ${conf.functions}`)
-            config.customFunctions = (await import(`${cwd}/${conf.functions}`))
-            config.functions = conf.functions
+            console.log(`loading custom function ${config.options.functions}`)
+            config.customFunctions = (await import(`${cwd}/${config.options.functions}`))
         }
         catch (e) {
-            console.error(`can't import your custom functions ${conf.functions}`, e)
+            console.error(`can't import your custom functions ${config.options.functions}`, e)
             process.exit(1)
         }
     }
@@ -230,7 +236,7 @@ const configFile = async () => {
 
 function exit(error, details, code = 1) {
     console.dir({ error, details }, { depth: Infinity})
-    if (app.devMode) {
+    if (app.dev) {
         console.log('________________________________________')
         return
     }
@@ -256,7 +262,7 @@ const router = (url) => {
     const u = splitURL(url)
     const args = {}
 
-    for (const r of config.routes) {
+    for (const r of config.dev.routes) {
         if (Number.isInteger(r.match)) continue
         const match = u.path.match(r.match)
         if (!match) continue
@@ -283,7 +289,7 @@ async function server(request, response) {
 
     // Route demandée
     let ssr
-    if (app.devMode) {
+    if (app.dev) {
         ssr = (route) => {
 
             // Vérifie que le chemin indiqué par la route existe puis l'importe
@@ -333,7 +339,7 @@ async function server(request, response) {
 
     }
 
-    // Communication spécifique pour le server compote /.well-known/compote
+    // Communication spécifique pour le server de dév compote /.well-known/compote
     if (request.url.startsWith('/.well-known/compote')) {
         const POST = {}
         console.log(`-------------- ${request.url} --------------`)
@@ -353,7 +359,7 @@ async function server(request, response) {
 
 
     // Aucune route ne correspond, on renvoie le fichier demandé du dossier public
-    const staticPath = app.devMode  ? config.paths.public : config.paths.dist
+    const staticPath = app.dev  ? config.paths.public : config.paths.dist
     filePath = filePath ? filePath : addPaths(staticPath, url)
     const extname = String(Path.extname(filePath)).toLowerCase()
     if (!extname) filePath += '/index.html'
@@ -406,7 +412,7 @@ async function server(request, response) {
                 response.writeHead(404)
                 if (filePath.indexOf('.html') > -1) {
 
-                    const custom404 = config.routes.find(r => r.match === 404)
+                    const custom404 = config.dev.routes.find(r => r.match === 404)
                     if (!custom404) return response.end(`Page Not Found\n`)
                     if (ssr) return ssr(custom404)
                 } 
@@ -496,7 +502,7 @@ async function build(compiledFilePath, attributes, response, request) {
 
             const env = {}
             Object.keys(process.env).filter(k => k.startsWith('PUBLIC_')).map(k => env[k] = process.env[k])
-            const state = { env, locale: env.PUBLIC_LANG || 'fr', components: {} }
+            const state = { dev: ${app.dev ? 'true' : 'false'}, env, locale: env.PUBLIC_LANG || 'fr', components: {} }
             state.canonical = "${process.env.PUBLIC_DOMAIN ? `https://${process.env.PUBLIC_DOMAIN}${request.url}` : request.url ?? ''}"
 
             state.components[RequestedComponent.name] = RequestedComponent
@@ -511,10 +517,10 @@ async function build(compiledFilePath, attributes, response, request) {
             compiledFilePath, 
             JSON.stringify(attributes), 
     ]
-    if (config.functions) argv.push(config.functions)
+    if (config.options.functions) argv.push(config.options.functions)
     const compote = new Worker(workerCode, { eval: true, argv })
     compote.once('message', content => {
-        const headers = { ...(config.options.headers ?? {}), 'Content-Type': 'text/html' }
+        const headers = { ...(config.dev.headers ?? {}), 'Content-Type': 'text/html' }
 
         // Si l'entête CSP est demandé, on extrait la balise meta concernée pour l'injecter dans le header HTTP
         const csp = 'Content-Security-Policy'
@@ -555,8 +561,16 @@ async function initProject() {
     }
 
     const defaultConfig = {
-        "server": {
+        "dev": {
             "port": 8080,
+            "routes": [
+                { "match": "^index\\.html$", "page": "HomePage" },
+                { "match": 404, "page": "NotFoundPage", "args": [ "path", "query" ] }
+            ],
+            "headers": {
+                "Content-Security-Policy": "report-uri /.well-known/compote; {CSP}"
+            },
+            "import_merging": false
         },
         "paths": {
             "src": "./src/components",
@@ -567,16 +581,10 @@ async function initProject() {
             "dist_styles": "./css",
             "cache": "./.compote/cache"
         },
-        "routes": [
-            { "match": "^index\\.html$", "page": "HomePage" },
-            { "match": 404, "page": "NotFoundPage", "args": [ "path", "query" ] }
-        ],
         "options": {
+            "functions": false,
             "minify": false,
             "hashed_filenames": true,
-            "headers": {
-                "Content-Security-Policy": "report-uri /.well-known/compote; {CSP}"
-            },
             "sitemap": {
                 "index": "sitemap.xml"
             }    
@@ -661,7 +669,7 @@ async function compote(args=[]) {
         required = { compiledPath, distPath }
         errorMessage = `missing path parameter\nnpx compote --build-pages <compiled path> <build path>`
     }
-    else if (options.includes('--compile') || options.includes('--watch')) {
+    else if (options.includes('--compile') || options.includes('--compile-dev') || options.includes('--watch')) {
         [ srcPath, compiledPath ] = argsWithoutOptions
         required = { srcPath, compiledPath }
         errorMessage = `missing path parameter\nnpx compote --compile <src path> <compiled path>`
@@ -753,8 +761,9 @@ Developement:
 
 
     // Fichier source => out
-    const doCompile = options.includes('--compile') || options.includes('--watch')
+    const doCompile = options.includes('--compile') || options.includes('--compile-dev') || options.includes('--watch')
     const srcFolder = doCompile && srcPath && !isFile(srcPath)
+    if (options.includes('--compile-dev')) app.dev = true
     
     
     // Compilation d'un dossier
@@ -765,7 +774,7 @@ Developement:
         for (const name in templates) {
             if ('html' in templates[name]) {
                 const html = `${templates[name].html}`
-                await compote([ '--compile', html, compiledPath ])
+                await compote([ options.includes('--compile-dev') ? '--compile-dev' : '--compile', html, compiledPath ])
             }
         }
     }
@@ -830,8 +839,8 @@ Developement:
 
         // Gestion des routes spécifiques dans <SETUP>
         if (compiled.setup?.route) {
-            if (!config.routes.find(r => r.self && r.page === name)) {
-                config.routes.push({ self: 1, match: new RegExp(`^${compiled.setup.route.replaceAll('.', '\\.')}$`), page: name })
+            if (!config.dev.routes.find(r => r.self && r.page === name)) {
+                config.dev.routes.push({ self: 1, match: new RegExp(`^${compiled.setup.route.replaceAll('.', '\\.')}$`), page: name })
             }
         }
 
@@ -887,7 +896,13 @@ Developement:
                     let assetFile = a.file || `${name}${++i > 1 ? i : ''}.${ext}`
     
                     // Si l'option "minimize" est activée
-                    const minified = app.minify ? app.minify(assetFile, ext === 'css' ? 'style' : 'script', a.content) : a.content
+                    const minified = app.minify ? app.minify({ 
+                        filename: assetFile, 
+                        type: ext === 'css' ? 'style' : 'script', 
+                        content: a.content, 
+                        app,
+                        options, 
+                    }) : a.content
     
                     await fs.writeFile(`${outputPath}/${assetFile}`, minified)
                         .catch(e => exit(`can't write the asset file ${outputPath}/${assetFile} !`, e))
@@ -991,7 +1006,7 @@ Developement:
         const env = {}
         Object.keys(process.env).filter(k => k.startsWith('PUBLIC_')).map(k => env[k] = process.env[k])
         const Compote = (await import(`${__dirname}/Compote.mjs`)).default
-        if (config.functions) {
+        if (config.options.functions) {
             Object.assign(Compote.fn, config.customFunctions)
         }
 
@@ -1175,11 +1190,11 @@ Developement:
 
         // Compile l'ensemble des components
         if (options.includes('--dev') && !options.includes('--bypass-compile')) {
-            await compote([ '--compile', srcPath, compiledPath ])
+            await compote([ '--compile-dev', srcPath, compiledPath ])
         }
 
         // Charge les dépendences
-        if (Array.isArray(config.routes)) config.routes = config.routes
+        if (Array.isArray(config.dev.routes)) config.dev.routes = config.dev.routes
         else console.warn(`\x1b[34mRoutes file ${routesFile} not found, switch to auto-detect mode\x1b[0m `)
 
         const dedup = {}
@@ -1199,7 +1214,7 @@ Developement:
             clearTimeout(dedup[filepath])
             dedup[filepath] = setTimeout(() => { 
                 console.log(`\ncomponent ${name}${ext} ${eventType}`)
-                compote([ '--compile', filepath, compiledPath ])
+                compote([ '--compile-dev', filepath, compiledPath ])
             })
         }
 
@@ -1216,8 +1231,8 @@ Developement:
     if (options.includes('--dev')
     || options.includes('--test')) {
 
-        if (options.includes('--dev')) app.devMode = true
-        if (process.env.DEV_PORT) config.server.port = process.env.DEV_PORT
+        if (options.includes('--dev')) app.dev = true
+        if (process.env.DEV_PORT) config.dev.port = process.env.DEV_PORT
         fsSync.mkdir(config.paths.cache, { recursive: true }, (e) => e ? console.error(e) : null)
 
         http = (await import('http')).default
@@ -1226,8 +1241,8 @@ Developement:
 
         // Créé un serveur web n attente de connexion
 
-        http.createServer(server).listen(config.server.port)
-        console.log(`\n${app.devMode ? 'Development' : 'Static'} server listening at http://localhost:${config.server.port}/\n`);
+        http.createServer(server).listen(config.dev.port)
+        console.log(`\n${app.dev ? 'Development' : 'Static'} server listening at http://localhost:${config.dev.port}/\n`);
         return
     }
     
@@ -1355,6 +1370,10 @@ async function sections(path, component, file, start=0, onlyTag) {
 
                         // Si le 1er caractère est « * » on préfixe par le dossier des composants compilés dynamiquement
                         if (value.at(0) === '*') {
+                            if (app.dev && !config.dev.import_merging) {
+                                console.log(`skip import merging ${value}`)
+                                continue
+                            }
                             toImportPath = config.paths.compiled
                             value = value.slice(1)
                         }
