@@ -988,10 +988,10 @@ Developement:
     && !options.includes('--bypass-build')) {
 
         // Supprime les anciens fichiers compilés (notamment pour les noms de fichiers avec hashage)
-        if (options.includes('--clean')) {
+        // if (options.includes('--clean')) {
             await fs.rm(config.paths.compiled, { recursive: true })
             await fs.mkdir(config.paths.compiled)
-        }
+        // }
 
         // Compile l'ensemble des components
         if (options.includes('--dist') && !options.includes('--bypass-compile')) {
@@ -1370,12 +1370,18 @@ async function sections(path, component, file, start=0, onlyTag) {
 
                         // Si le 1er caractère est « * » on préfixe par le dossier des composants compilés dynamiquement
                         if (value.at(0) === '*') {
+                            /*
                             if (app.dev && !config.dev.import_merging) {
                                 console.log(`skip import merging ${value}`)
                                 continue
                             }
+                            */
                             toImportPath = config.paths.compiled
                             value = value.slice(1)
+                            console.log(`${component} ${tag} require merging external component ${value}`)
+                            if (!('merging' in slice)) slice.merging = []
+                            slice.merging.push(value)
+                            continue
                         }
 
                         const toImport = addPaths(toImportPath, value)
