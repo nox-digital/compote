@@ -524,7 +524,7 @@ async function build(compiledFilePath, attributes, response, request) {
         worker()
     `
     const argv = [ 
-            compiledFilePath, 
+            ifMetaComponent(compiledFilePath), 
             JSON.stringify(attributes), 
             JSON.stringify(config),
     ]
@@ -828,7 +828,7 @@ Developement:
                     })
 
 
-                console.log(`Merge ${to}@.${ext} [ ${exists.map(x => x.split('/').at(-1)).join(', ')} ]`)
+                // console.log(`Merge ${to}@.${ext} [ ${exists.map(x => x.split('/').at(-1)).join(', ')} ]`)
             }
 
 
@@ -867,7 +867,6 @@ Developement:
             // Décline le fichier tpl.mjs en incluant les nouvelles données script/style
             const script = JSON.stringify(t.js.data)
             const style = JSON.stringify(t.css.data)
-            console.log(style)
 
             const metaTpl = [
                 tpl.slice(0, t.js.start),
@@ -1195,7 +1194,7 @@ Developement:
         }
         for (const page of pages) {
             
-            const Component = (await import(`${compiledFullPath}/${page}`)).default
+            const Component = (await import(ifMetaComponent(`${compiledFullPath}/${page}`))).default
             state.allComponents[Component.name] = Component
             const routes = 'routes' in Component ? await Component.routes() : [ 
                 { 
