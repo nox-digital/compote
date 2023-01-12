@@ -487,7 +487,7 @@ async function build(compiledFilePath, attributes, response, request) {
     // }
 
     let compiledFullPath = addPaths(cwd, compiledFilePath)
-    
+
     const workerCode = `
         const worker = async () => {
             const [ , , component, attributesJSON, configJSON ] = process.argv
@@ -517,9 +517,8 @@ async function build(compiledFilePath, attributes, response, request) {
     const argv = [ 
             compiledFilePath, 
             JSON.stringify(attributes), 
+            JSON.stringify(config),
     ]
-    // if (config.options.functions) argv.push(config.options.functions)
-    argv.push(JSON.stringify(config))
     const compote = new Worker(workerCode, { eval: true, argv })
     compote.once('message', content => {
         const headers = { ...(config.dev.headers ?? {}), 'Content-Type': 'text/html' }
@@ -571,8 +570,7 @@ async function initProject() {
             ],
             "headers": {
                 "Content-Security-Policy": "report-uri /.well-known/compote; {CSP}"
-            },
-            "import_merging": false
+            }
         },
         "paths": {
             "src": "./src/components",
@@ -855,7 +853,7 @@ Developement:
                 t[ext].main.integrity = t[ext].checksum.integrity
                 t[ext].main.hash = t[ext].checksum.hash
                 t[ext].main.file_hash = t[ext].checksum.file_hash 
-            }            
+            }
   
             // Décline le fichier tpl.mjs en incluant les nouvelles données script/style
             const script = JSON.stringify(t.js.data)

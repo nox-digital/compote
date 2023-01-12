@@ -252,7 +252,7 @@ ___________________________________________________
         if (Array.isArray(pair) && pair[0] instanceof Object) {
             for (fn in pair[0]) break
             if (fn in this.functions) {
-                return this.functions[ fn ](state, instance, pair[0], pair[1])
+                return this.functions[fn](state, instance, pair[0], pair[1])
             }
             console.dir({ error: `nextPair() pair function unknown`, fn, pair }, { depth: Infinity } )
         }
@@ -416,7 +416,6 @@ ___________________________________________________
             for (const e in Compote.fn.env) Compote.fn.env[e] = state.env[e]
         }
 
-
         // Vérifie les attributs
         this.checkFormat(___.param, instance, caller)
 
@@ -442,7 +441,6 @@ ___________________________________________________
 
         // Vérifie les variables générées
         this.checkFormat(___.var, instance, caller)
-
 
         // Convertit chaque « paire »
         let html = (await Promise.all(
