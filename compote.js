@@ -490,11 +490,12 @@ async function build(compiledFilePath, attributes, response, request) {
     
     const workerCode = `
         const worker = async () => {
-            const [ , , component, attributesJSON, functions ] = process.argv
+            const [ , , component, attributesJSON, configJSON ] = process.argv
             const attributes = JSON.parse(attributesJSON)
+            const config = JSON.parse(configJSON)
             const Compote = (await import('${__dirname}/Compote.mjs')).default
-            if (functions) {
-                const fn = (await import(functions))
+            if (config.options.functions) {
+                const fn = (await import(config.options.functions))
                 Object.assign(Compote.fn, fn)
             }
             const RequestedComponent = (await import(component)).default
@@ -502,7 +503,7 @@ async function build(compiledFilePath, attributes, response, request) {
 
             const env = {}
             Object.keys(process.env).filter(k => k.startsWith('PUBLIC_')).map(k => env[k] = process.env[k])
-            const state = { dev: ${app.dev ? 'true' : 'false'}, env, locale: env.PUBLIC_LANG || 'fr', components: {} }
+            const state = { dev: ${app.dev ? 'true' : 'false'}, env, locale: env.PUBLIC_LANG || 'fr', components: {}, config }
             state.canonical = "${process.env.PUBLIC_DOMAIN ? `https://${process.env.PUBLIC_DOMAIN}${request.url}` : request.url ?? ''}"
 
             state.components[RequestedComponent.name] = RequestedComponent
@@ -517,7 +518,8 @@ async function build(compiledFilePath, attributes, response, request) {
             compiledFilePath, 
             JSON.stringify(attributes), 
     ]
-    if (config.options.functions) argv.push(config.options.functions)
+    // if (config.options.functions) argv.push(config.options.functions)
+    argv.push(JSON.stringify(config))
     const compote = new Worker(workerCode, { eval: true, argv })
     compote.once('message', content => {
         const headers = { ...(config.dev.headers ?? {}), 'Content-Type': 'text/html' }
@@ -621,7 +623,6 @@ async function integrity(content, algo='sha256') {
         hash: simpleHash(b64), // b64.replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '~'),
     }
 }
-
 
 async function compote(args=[]) {
 
@@ -776,6 +777,101 @@ Developement:
                 const html = `${templates[name].html}`
                 await compote([ options.includes('--compile-dev') ? '--compile-dev' : '--compile', html, compiledPath ])
             }
+        }
+
+        // Fusion des scripts/styles vers le fichier <composant>@.[js/css]
+        for (const to in config.options.merge) {
+            const t = { 
+                js: {
+                    tag: 'script', 
+                },
+                css: {
+                    tag: 'style',
+                }
+            }
+
+            // Prend chaque fichiers source .css/.js pour les fusionner en un seul 
+            for (const ext in t) {
+                const metaFilename = addPaths(compiledPath, `${to}@.${ext}`)
+                // var toStream = await fsSync.createWriteStream(metaFilename)
+                const exists = []
+                for (let cpn of [ to, ...config.options.merge[to] ]) {
+                    const filepath = addPaths(compiledPath, `${cpn}.${ext}`)
+                    if (await fsSync.existsSync(filepath)) exists.push(filepath)
+                }
+                let merged = []
+                for (let filepath of exists) {
+                    merged.push(await fs.readFile(filepath, { encoding: 'utf-8' }))
+                    // await fsSync.createReadStream(filepath).pipe(toStream)
+                }
+                merged = merged.join('')
+                await fs.writeFile(metaFilename, merged)
+                    .catch(e => exit(`can't write the file ${metaFilename} !`, e))
+
+
+                // Calcul le checksum d'intégrité
+                t[ext].checksum = await integrity(merged)
+                t[ext].checksum.file_hash = `${to}${config.syntax.hashed_filename}${t[ext].checksum.hash}.${ext}`
+
+                // Créer le lien hard vers la version de fichier incluant le hash
+                await fs.link(metaFilename, addPaths(compiledPath, t[ext].checksum.file_hash))
+                    .catch(e => {
+                        if (e.code === 'EEXIST') return
+                        exit(`can't write the asset hashed filename link ${compiledPath}/${t[ext].checksum.file_hash} !`, e)
+                    })
+
+
+                console.log(`Merge ${to}@.${ext} [ ${exists.map(x => x.split('/').at(-1)).join(', ')} ]`)
+            }
+
+
+            // Clone le contenu actuel du composant pour changer les hash/integrity des fichiers scripts/styles fusionnés
+            const toTpl = `${to}.tpl.mjs`
+            const toPath = addPaths(compiledPath, toTpl)
+            const tpl = await fs.readFile(toPath, { encoding: 'utf-8' })
+                .catch(e => exit(`can't read the file ${toPath} !`, e))
+
+            // Recherche la partie des scripts
+            t.js.start = tpl.indexOf('script: [')
+            if (t.js.start === -1) return exit(`can't find the « script: [] » section in template ${toTpl} !`)
+            t.js.end = t.css.start = tpl.indexOf('style: [', t.js.start)
+            if (t.css.start === -1) return exit(`can't find the « style: [] » section in template ${toTpl} !`)
+            t.css.end = tpl.indexOf('template: [', t.css.start)
+            if (t.css.end === -1) return exit(`can't find the « template: [] » section in template ${toTpl} !`)
+
+            // Extrait la partie script/style
+            for (const ext in t) {
+                const codeJS = tpl.slice(tpl.indexOf('[', t[ext].start), tpl.lastIndexOf(',', t[ext].end))
+                t[ext].json = codeJS.replaceAll(/(['"])?([a-zA-Z0-9_]+)(['"])?:/g, '"$2": ').replaceAll("'", '"')
+                try {
+                    t[ext].data = JSON.parse(t[ext].json)
+                }
+                catch (e) {
+                    return exit(`Can't parse JS code of « ${t[ext].tag} » in template ${toTpl} for merging feature`, e)
+                }        
+
+                t[ext].main = t[ext].data.find(s => s.file === `${to}.${ext}`)
+                t[ext].main.file = `${to}@.${ext}`
+                t[ext].main.integrity = t[ext].checksum.integrity
+                t[ext].main.hash = t[ext].checksum.hash
+                t[ext].main.file_hash = t[ext].checksum.file_hash 
+            }            
+  
+            // Décline le fichier tpl.mjs en incluant les nouvelles données script/style
+            const script = JSON.stringify(t.js.data)
+            const style = JSON.stringify(t.css.data)
+            console.log(style)
+
+            const metaTpl = [
+                tpl.slice(0, t.js.start),
+                `script: ${script}, \nstyle: ${style},\n`,
+                tpl.slice(t.css.end),
+            ].join('')
+        
+            const metaTplFilename = addPaths(compiledPath, `${to}@.tpl.mjs`)
+            await fs.writeFile(metaTplFilename, metaTpl)
+                .catch(e => exit(`can't write the file ${metaTplFilename} !`, e))
+
         }
     }
 
@@ -942,7 +1038,7 @@ Developement:
                 scriptLabels: ${inspect(compiled.scriptLabels, opt)},
                 script: ${inspect(assets.js, opt)},
                 style: ${inspect(assets.css, opt)},
-                template:  ${inspect(compiled.template, opt)},
+                template: ${inspect(compiled.template, opt)},
             }
     
             constructor(Compote, state, attributes, slot) {
@@ -1366,22 +1462,6 @@ async function sections(path, component, file, start=0, onlyTag) {
                                 if (name in process.env) value = value.replace(`{${name}}`, process.env[name])
                                 else throw Error(`Environment variable « ${name} » not found. Can't create the file ${value} from ${component}`)
                             }
-                        }
-
-                        // Si le 1er caractère est « * » on préfixe par le dossier des composants compilés dynamiquement
-                        if (value.at(0) === '*') {
-                            /*
-                            if (app.dev && !config.dev.import_merging) {
-                                console.log(`skip import merging ${value}`)
-                                continue
-                            }
-                            */
-                            toImportPath = config.paths.compiled
-                            value = value.slice(1)
-                            console.log(`${component} ${tag} require merging external component ${value}`)
-                            if (!('merging' in slice)) slice.merging = []
-                            slice.merging.push(value)
-                            continue
                         }
 
                         const toImport = addPaths(toImportPath, value)
