@@ -404,7 +404,7 @@ async function server(request, response) {
         if (componentName.at(0) < 'A' || componentName.at(0) > 'Z') continue
 
         filePath = `${config.paths.compiled}/${componentName}${extname}`
-        console.log('Re-routed', type, filePath)
+        // console.log('Re-routed', type, filePath)
     }
     fsSync.readFile(filePath, function(error, content) {
         if (error) {
@@ -476,17 +476,26 @@ const addPaths = (...paths) => {
     return all.join('/')
 }
 
+function ifMetaComponent(filename) {
+    const lastSlash = filename.lastIndexOf('/')
+    const ext = filename.lastIndexOf('.tpl.mjs')
+    const cpn = filename.slice(lastSlash === -1 ? 0 : lastSlash + 1, ext)
+    if (cpn in config.options.merge) return filename.replace(cpn, `${cpn}@`)
+    return filename
+}
 
 async function build(compiledFilePath, attributes, response, request) {
 
     const { Worker, MessageChannel, MessagePort, isMainThread, parentPort } = (await import('worker_threads'))
+
+    const cpn = compiledFilePath.split('/').at(-1).replace('.tpl.mjs', '')
 
     // if (process.env.ENV) {
     //     await envFile(process.env.ENV)
     //     delete process.env.ENV
     // }
 
-    let compiledFullPath = addPaths(cwd, compiledFilePath)
+    let compiledFullPath = addPaths(cwd, ifMetaComponent(compiledFilePath))
 
     const workerCode = `
         const worker = async () => {
@@ -507,7 +516,7 @@ async function build(compiledFilePath, attributes, response, request) {
             state.canonical = "${process.env.PUBLIC_DOMAIN ? `https://${process.env.PUBLIC_DOMAIN}${request.url}` : request.url ?? ''}"
 
             state.components[RequestedComponent.name] = RequestedComponent
-            await Compote.loadDependencies(RequestedComponent, state.components, true, '${compiledFullPath}')
+            await Compote.loadDependencies(RequestedComponent, state.components, true, state, '${compiledFullPath}')
             const requestedComponent = new RequestedComponent(Compote, state, attributes)        
             output = await Compote.build(state, requestedComponent, undefined, true)        
             parentPort.postMessage(output)
@@ -1194,7 +1203,7 @@ Developement:
                     params: {},
                 }
             ]
-            state.components = await Compote.loadDependencies(Component, state.allComponents, true, compiledFullPath)
+            state.components = await Compote.loadDependencies(Component, state.allComponents, true, state, compiledFullPath)
             console.log(`${page} ${routes.length}x... => ${prefix}`)
 
 

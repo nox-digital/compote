@@ -68,7 +68,7 @@ async function start(component, jsonAttributes, options) {
             const RequestedComponent = (await import(component)).default
             const componentName = RequestedComponent.name
             state.components[componentName] = RequestedComponent
-            await Builder.loadDependencies(RequestedComponent, state.components, true)
+            await Builder.loadDependencies(RequestedComponent, state.components, true, state)
 
             if (options.includes('--all') || options.includes('--all-pages')) {
                 const all = await RequestedComponent.routes()

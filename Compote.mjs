@@ -472,7 +472,16 @@ ___________________________________________________
         return html
     }
 
-    static async loadDependencies(Component, loaded, nested=false, compiledPath='./') {
+    static ifMetaComponent(filename, config) {
+        const lastSlash = filename.lastIndexOf('/')
+        const ext = filename.lastIndexOf('.tpl.mjs')
+        const cpn = filename.slice(lastSlash === -1 ? 0 : lastSlash + 1, ext)
+        if (cpn in config.options.merge) return filename.replace(cpn, `${cpn}@`)
+        return filename
+    }
+    
+
+    static async loadDependencies(Component, loaded, nested=false, state, compiledPath='./') {
         const isFile = (path) => {
             if (path.at(-1) === '/') return false
             const parts = path.split('/')
@@ -485,12 +494,12 @@ ___________________________________________________
         components[Component.name] = Component
         for (let dep in Component.___.dependencies) {
             if (!(dep in loaded)) {
-                const dependency = Component.___.dependencies[dep].replace('#compiled', '')
+                const dependency = this.ifMetaComponent(Component.___.dependencies[dep].replace('#compiled', ''), state.config)
                 loaded[dep] = (await import(`${directory}/${dependency}`)).default
             }
             components[dep] = loaded[dep]
             if (nested && Component.name != loaded[dep].name) {
-                const subComponents = await this.loadDependencies(loaded[dep], loaded, true, directory)
+                const subComponents = await this.loadDependencies(loaded[dep], loaded, true, state, directory)
                 for (const c in subComponents) components[c] = subComponents[c]
             }
         }
