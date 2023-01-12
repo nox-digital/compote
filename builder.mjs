@@ -1,3 +1,4 @@
+/*
 import Builder from '#components/ComponentBuilder.mjs'
 import { readFile, writeFile, mkdir, readdir } from 'fs/promises'
 
@@ -129,3 +130,5 @@ for (const a of args) {
 }
 
 start(component, jsonAttributes, options)
+
+*/

@@ -1113,7 +1113,7 @@ Developement:
             Object.assign(Compote.fn, config.customFunctions)
         }
 
-        const state = { env, locale: env.PUBLIC_LANG || 'fr', components: {}, allComponents: {} }
+        const state = { env, locale: env.PUBLIC_LANG || 'fr', components: {}, allComponents: {}, config }
         
         const mkdirCreated = []
         let output = ''
