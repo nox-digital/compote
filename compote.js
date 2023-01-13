@@ -773,16 +773,25 @@ Developement:
     const srcFolder = doCompile && srcPath && !isFile(srcPath)
     if (options.includes('--compile-dev')) app.dev = true
     
+    // Compilation dossier/fichier spécifique
+    if (doCompile && !('templates' in app)) {
+        const srcRoot = srcFolder ? (srcPath.at(-1) === '/' ? srcPath.slice(0, -1) : srcPath) : srcPath.slice(0, srcPath.lastIndexOf('/'))
+        console.log({ srcRoot, srcFolder })
+        app.templates = await findComponentFiles(srcRoot)
+    }
+
     
     // Compilation d'un dossier
     if (doCompile && srcFolder) {
     
         console.log(`Compilation of directory ${srcPath}`)
-        const templates = await findComponentFiles(srcPath.at(-1) === '/' ? srcPath.slice(0, -1) : srcPath)
-        for (const name in templates) {
-            if ('html' in templates[name]) {
-                const html = `${templates[name].html}`
+        // app.templates = await findComponentFiles(srcPath.at(-1) === '/' ? srcPath.slice(0, -1) : srcPath)
+        for (const name in app.templates) {
+            if ('html' in app.templates[name]) {
+                const html = `${app.templates[name].html}`
+                app.multipleCompile = true
                 await compote([ options.includes('--compile-dev') ? '--compile-dev' : '--compile', html, compiledPath ])
+                delete app.multipleCompile
             }
         }
 
@@ -1054,7 +1063,17 @@ Developement:
         await fs.writeFile(outputFile, output)
             .catch(e => exit(`can't write the file ${outputFile} !`, e))
 
+        
+        // Vérifie si ce composant fait parti d'un meta composant pour recompiler ce dernier également
+        if (!app.multipleCompile) {
+            const metaComponents = Object.keys(config.options.merge).filter(m => config.options.merge[m].includes(name))
 
+            for (const meta of metaComponents) {
+                const html = `${app.templates[meta].html}`
+                console.log(`${name} is a dependence of meta component ${html}`)
+                await compote([ options.includes('--compile-dev') ? '--compile-dev' : '--compile', html, compiledPath ])
+            }
+        }
     }
 
 
