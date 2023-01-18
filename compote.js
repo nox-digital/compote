@@ -59,7 +59,8 @@ const defaultOptions = {
         routes: [],
     },
     options: {
-        minify: false,
+        functions: false,
+        pipe: false,
         hashed_filename: true,
         sitemap: {
             index: 'sitemap.xml'
@@ -592,7 +593,7 @@ async function initProject() {
         },
         "options": {
             "functions": false,
-            "minify": false,
+            "pipe": false,
             "hashed_filenames": true,
             "sitemap": {
                 "index": "sitemap.xml"
@@ -1006,8 +1007,8 @@ Developement:
                 if (a.content?.trim()) {
                     let assetFile = a.file || `${name}${++i > 1 ? i : ''}.${ext}`
     
-                    // Si l'option "minimize" est activée
-                    const minified = app.minify ? app.minify({ 
+                    // Si l'option "pipe" est activée
+                    const piped = app.pipe ? await app.pipe({ 
                         filename: assetFile, 
                         type: ext === 'css' ? 'style' : 'script', 
                         content: a.content, 
@@ -1015,10 +1016,10 @@ Developement:
                         options, 
                     }) : a.content
     
-                    await fs.writeFile(`${outputPath}/${assetFile}`, minified)
+                    await fs.writeFile(`${outputPath}/${assetFile}`, piped)
                         .catch(e => exit(`can't write the asset file ${outputPath}/${assetFile} !`, e))
                     a.file = assetFile
-                    Object.assign(a, await integrity(minified))
+                    Object.assign(a, await integrity(piped))
 
                     // Hard link pour la version hashée 
                     if (config.options.hashed_filenames) {
@@ -2505,8 +2506,8 @@ var copy = ((srcpath, destpath) => {
 const start = async () => {
     await envFile('.env')
     await configFile()
-    if (config.options.minify) {
-        app.minify = (await import(`${cwd}/${config.options.minify}`)).minify
+    if (config.options.pipe) {
+        app.pipe = (await import(`${cwd}/${config.options.pipe}`)).pipe
     }
     compote(process.argv.slice(2))
 }
