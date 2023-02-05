@@ -283,7 +283,6 @@ const router = (url) => {
 async function server(request, response) {
 
     
-    console.log('HTTP request ', request.url)
     const [ urlWithoutParams, params ] = request.url.split('?', 1)
     const url = urlWithoutParams.at(-1) === '/' ? `${urlWithoutParams}index.html` : urlWithoutParams
     let filePath
@@ -292,6 +291,7 @@ async function server(request, response) {
     let ssr
     if (app.dev) {
         ssr = (route) => {
+            console.log('HTTP request ', request.url, route.page)
 
             // Vérifie que le chemin indiqué par la route existe puis l'importe
             const compiledFilePath = addPaths(config.paths?.compiled, `${route.page}.tpl.mjs`)
@@ -315,6 +315,8 @@ async function server(request, response) {
         const route = router(url)
         if (route.rewrited) {
             filePath = `${config.paths.cache}/${route.path}`
+            console.log('HTTP request ', request.url, route.rewrited)
+
 
             // S'il n'existe pas encore en cache
             if (!route.cache || !fsSync.existsSync(filePath)) {
@@ -335,7 +337,36 @@ async function server(request, response) {
             }
         }
         else if (route.page) {
+            console.log('HTTP request ', request.url, route.page)
             return ssr(route)
+        }   
+        else if (route.proxy) {
+            console.log('HTTP request ', request.url, route.proxy)
+
+            let [ hostname, port ] = route.proxy.split(':')
+            if (!hostname) hostname = '127.0.0.1'
+            if (!port) port = 80
+
+            var options = {
+                hostname,
+                port,
+                path: request.url,
+                method: request.method,
+                headers: request.headers
+            }
+
+            var proxy = http.request(options, (res) => {
+                response.writeHead(res.statusCode, res.headers)
+                res.pipe(response, {
+                    end: true
+                })
+            })
+
+            request.pipe(proxy, {
+                end: true
+            })
+            return
+            // return fetch(`${proxy}${url}`)
         }
 
     }
