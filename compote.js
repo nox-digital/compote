@@ -342,7 +342,6 @@ async function server(request, response) {
         }   
         else if (route.proxy) {
             console.log('HTTP request ', request.url, route.proxy)
-
             let [ hostname, port ] = route.proxy.split(':')
             if (!hostname) hostname = '127.0.0.1'
             if (!port) port = 80
@@ -361,12 +360,16 @@ async function server(request, response) {
                     end: true
                 })
             })
+            .on('error', e => {
+                console.error(`Request error to the reverse proxy`, e.toString())
+                response.writeHead(503)
+                response.end(``)
+            })
 
             request.pipe(proxy, {
                 end: true
             })
             return
-            // return fetch(`${proxy}${url}`)
         }
 
     }
