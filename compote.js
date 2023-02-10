@@ -607,7 +607,16 @@ async function initProject() {
 
     const defaultConfig = {
         "dev": {
-            "port": 8080,
+            "http": {
+                "enable": true,
+                "port": 1080
+            },
+            "https": {
+                "enable": false,
+                "port": 1443,
+                "key": "./tls/localhost.key",
+                "cert": "./tls/localhost.crt"
+            },
             "routes": [
                 { "match": "^index\\.html$", "page": "HomePage" },
                 { "match": 404, "page": "NotFoundPage", "args": [ "path", "query" ] }
@@ -1388,7 +1397,8 @@ Developement:
     || options.includes('--test')) {
 
         if (options.includes('--dev')) app.dev = true
-        if (process.env.DEV_PORT) config.dev.port = process.env.DEV_PORT
+        if (process.env.DEV_HTTP_PORT) config.dev.http.port = process.env.DEV_HTTP_PORT
+        if (process.env.DEV_HTTPS_PORT) config.dev.https.port = process.env.DEV_HTTPS_PORT
         fsSync.mkdir(config.paths.cache, { recursive: true }, (e) => e ? console.error(e) : null)
 
         http = (await import('http')).default
@@ -1396,9 +1406,20 @@ Developement:
         Path = (await import('path')).default
 
         // Créé un serveur web n attente de connexion
+        console.log(`\n${app.dev ? 'Development' : 'Static'} server`)
+        if (config.dev.http.enable) {
+            http.createServer(server).listen(config.dev.http.port)
+            console.log(`\nListening at http://localhost:${config.dev.http.port}/\n`);
+        }
+        if (config.dev.https.enable) {
+            const options = {
+                key: fsSync.readFileSync(config.dev.https.key),
+                cert: fsSync.readFileSync(config.dev.https.cert),
+            }
+            https.createServer(options, server).listen(config.dev.https.port)
+            console.log(`\nListening at https://localhost:${config.dev.https.port}/\n`);
+        }
 
-        http.createServer(server).listen(config.dev.port)
-        console.log(`\n${app.dev ? 'Development' : 'Static'} server listening at http://localhost:${config.dev.port}/\n`);
         return
     }
     
