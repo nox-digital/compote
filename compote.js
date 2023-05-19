@@ -1726,11 +1726,11 @@ async function compileLabel(code, className) {
             }
         }
 
-        if (config.options.i18n_fallback) {
-            for (const locale in translations) {
-                if (!translations[locale]) translations[locale] = translations[config.options.i18n_fallback]
-            }
-        }
+        // if (config.options.i18n_fallback) {
+        //     for (const locale in translations) {
+        //         if (!translations[locale]) translations[locale] = translations[config.options.i18n_fallback]
+        //     }
+        // }
 
         if (!Object.keys(translations).length) throw Error(`LABEL ERROR no translation found for the label « ${label} »`, { '#': l, label })
 
@@ -1740,6 +1740,23 @@ async function compileLabel(code, className) {
                 labels[locale][label.replace('()', '')] = translations[locale] // new Translation({ locale, label, translation: translations[locale], className })
             } else {
                 labels[locale][label] = translations[locale]
+            }
+        }
+
+        const fallback = config.options.i18n_fallback
+        if (fallback) {
+            for (const locale in translations) {
+                if (locale === fallback) continue
+                for (const label in labels[locale]) {
+                    if (typeof labels[locale][label] === 'string') {
+                        if (!labels[locale][label]) labels[locale][label] = labels[fallback][label]
+                    }
+                    else {
+                        for (const cond in labels[locale][label]) {
+                            if (!labels[locale][label][cond]) labels[locale][label][cond] = labels[fallback][label][cond]
+                        }
+                    }
+                }
             }
         }
     }
