@@ -62,6 +62,7 @@ const defaultOptions = {
         functions: false,
         pipe: false,
         hashed_filename: true,
+        i18n_fallback: '',
         sitemap: {
             index: 'sitemap.xml'
         }
@@ -1724,6 +1725,13 @@ async function compileLabel(code, className) {
                 translations[locale] = translation
             }
         }
+
+        if (config.options.i18n_fallback) {
+            for (const locale in translations) {
+                if (!translations[locale]) translations[locale] = translations[config.options.i18n_fallback]
+            }
+        }
+
         if (!Object.keys(translations).length) throw Error(`LABEL ERROR no translation found for the label « ${label} »`, { '#': l, label })
 
         for (const locale in translations) {
