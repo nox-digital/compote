@@ -280,8 +280,15 @@ const router = (url) => {
     return { ...u, match: false, page: '' }
 }
 
+async function serverHTTPS(request, response) { 
+    return server(app.serverHTTPS, request, response)
+}
 
-async function server(request, response) {
+async function serverHTTP(request, response) { 
+    return server(app.serverHTTP, request, response)
+}
+
+async function server(serverType, request, response) {
 
     
     const [ urlWithoutParams, params ] = request.url.split('?', 1)
@@ -291,8 +298,10 @@ async function server(request, response) {
     // Route demandée
     let ssr
     if (app.dev) {
+        const origin = `:${serverType.address().port}`
+
         ssr = (route) => {
-            console.log('HTTP request ', request.url, route.page)
+            // console.log(origin, request.url, route.page)
 
             // Vérifie que le chemin indiqué par la route existe puis l'importe
             const compiledFilePath = addPaths(config.paths?.compiled, `${route.page}.tpl.mjs`)
@@ -316,7 +325,7 @@ async function server(request, response) {
         const route = router(url)
         if (route.rewrited) {
             filePath = `${config.paths.cache}/${route.path}`
-            console.log('HTTP request ', request.url, route.rewrited)
+            console.log('Request', origin, request.url, route.rewrited)
 
 
             // S'il n'existe pas encore en cache
@@ -338,11 +347,11 @@ async function server(request, response) {
             }
         }
         else if (route.page) {
-            console.log('HTTP request ', request.url, route.page)
+            console.log('Request', origin, request.url, route.page)
             return ssr(route)
         }   
         else if (route.proxy) {
-            console.log('HTTP request ', request.url, route.proxy)
+            console.log('Request', origin, request.url, route.proxy)
             let [ hostname, port ] = route.proxy.split(':')
             if (!hostname) hostname = '127.0.0.1'
             if (!port) port = 80
@@ -1409,26 +1418,21 @@ Developement:
         // Créé un serveur web n attente de connexion
         console.log(`\n${app.dev ? 'Development' : 'Static'} server`)
         if (config.dev.http.enable) {
-            try {
-                http.createServer(server).listen(config.dev.http.port)
-                console.log(`\nListening at http://localhost:${config.dev.http.port}/\n`);
-            }
-            catch (e) {
-                console.warn(`Can't listen on HTTP port ${config.dev.http.port}`)
-            }
+            app.serverHTTP = http.createServer(serverHTTP)
+            app.serverHTTP.on('listening', (e) => console.warn(`Listening on http://localhost:${config.dev.http.port}\n`))
+            app.serverHTTP.on('error', (e) => console.warn(`Can't listen on ${config.dev.http.port}\n`))
+            app.serverHTTP.listen(config.dev.http.port)
         }
         if (config.dev.https.enable) {
             const options = {
                 key: fsSync.readFileSync(config.dev.https.key),
                 cert: fsSync.readFileSync(config.dev.https.cert),
             }
-            try {
-                https.createServer(options, server).listen(config.dev.https.port)
-                console.log(`\nListening at https://localhost:${config.dev.https.port}/\n`);
-            }
-            catch (e) {
-                console.warn(`Can't listen on HTTPS port ${config.dev.https.port}`)
-            }
+            app.serverHTTPS = https.createServer(options, serverHTTPS)
+            app.serverHTTPS.on('listening', (e) => console.warn(`Listening on https://localhost:${config.dev.https.port}\n`))
+            app.serverHTTPS.on('error', (e) => console.warn(`Can't listen on ${config.dev.https.port}\n`))
+            app.serverHTTPS.listen(config.dev.https.port)
+
         }
 
         console.log(`\n[x] Exit\n\n`)
