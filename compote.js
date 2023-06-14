@@ -8,7 +8,7 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import { exec, spawn } from 'child_process'
 import crypto from 'crypto'
-
+import * as readline from 'node:readline';
 
 const customInspectSymbol = Symbol.for('nodejs.util.inspect.custom')
 const __filename = fileURLToPath(import.meta.url)
@@ -1409,18 +1409,38 @@ Developement:
         // Créé un serveur web n attente de connexion
         console.log(`\n${app.dev ? 'Development' : 'Static'} server`)
         if (config.dev.http.enable) {
-            http.createServer(server).listen(config.dev.http.port)
-            console.log(`\nListening at http://localhost:${config.dev.http.port}/\n`);
+            try {
+                http.createServer(server).listen(config.dev.http.port)
+                console.log(`\nListening at http://localhost:${config.dev.http.port}/\n`);
+            }
+            catch (e) {
+                console.warn(`Can't listen on HTTP port ${config.dev.http.port}`)
+            }
         }
         if (config.dev.https.enable) {
             const options = {
                 key: fsSync.readFileSync(config.dev.https.key),
                 cert: fsSync.readFileSync(config.dev.https.cert),
             }
-            https.createServer(options, server).listen(config.dev.https.port)
-            console.log(`\nListening at https://localhost:${config.dev.https.port}/\n`);
+            try {
+                https.createServer(options, server).listen(config.dev.https.port)
+                console.log(`\nListening at https://localhost:${config.dev.https.port}/\n`);
+            }
+            catch (e) {
+                console.warn(`Can't listen on HTTPS port ${config.dev.https.port}`)
+            }
         }
 
+        console.log(`\n[x] Exit\n\n`)
+        
+                
+        readline.emitKeypressEvents(process.stdin)
+        if (process.stdin.isTTY) process.stdin.setRawMode(true)
+
+        process.stdin.on('keypress', (chunk, key) => {
+            if (key && key.name == 'x') process.exit()
+        })
+    
         return
     }
     
