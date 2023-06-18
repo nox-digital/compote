@@ -1124,8 +1124,9 @@ Developement:
 
             for (const meta of metaComponents) {
                 const html = `${app.templates[meta].html}`
-                console.log(`${name} is a dependence of meta component ${html}`)
-                await compote([ options.includes('--compile-dev') ? '--compile-dev' : '--compile', html, compiledPath ])
+                console.log(`${name} is a dependence of meta component ${html}, restart for full compilation...`)
+                process.exit(2)
+                // await compote([ options.includes('--compile-dev') ? '--compile-dev' : '--compile', html, compiledPath ])
             }
         }
     }
@@ -1418,24 +1419,21 @@ Developement:
         // Créé un serveur web n attente de connexion
         console.log(`\n${app.dev ? 'Development' : 'Static'} server`)
         if (config.dev.http.enable) {
-            app.serverHTTP = http.createServer(serverHTTP)
-            app.serverHTTP.on('listening', (e) => console.warn(`Listening on http://localhost:${config.dev.http.port}\n`))
-            app.serverHTTP.on('error', (e) => console.warn(`Can't listen on ${config.dev.http.port}\n`))
-            app.serverHTTP.listen(config.dev.http.port)
+            // app.serverHTTP = http.createServer(serverHTTP)
+            // app.serverHTTP.on('listening', (e) => console.warn(`Listening on http://localhost:${config.dev.http.port}\n`))
+            // app.serverHTTP.on('error', (e) => console.warn(`Can't listen on ${config.dev.http.port}\n`))
+            // app.serverHTTP.listen(config.dev.http.port)
+            await startServer({ ports: config.dev.http.port, key: 'serverHTTP', server: http, handler: serverHTTP })
         }
         if (config.dev.https.enable) {
             const options = {
                 key: fsSync.readFileSync(config.dev.https.key),
                 cert: fsSync.readFileSync(config.dev.https.cert),
             }
-            app.serverHTTPS = https.createServer(options, serverHTTPS)
-            app.serverHTTPS.on('listening', (e) => console.warn(`Listening on https://localhost:${config.dev.https.port}\n`))
-            app.serverHTTPS.on('error', (e) => console.warn(`Can't listen on ${config.dev.https.port}\n`))
-            app.serverHTTPS.listen(config.dev.https.port)
-
+            await startServer({ ports: config.dev.https.port, key: 'serverHTTPS', server: https, options, handler: serverHTTPS, isHTTPS: true })
         }
 
-        console.log(`\n[x] Exit\n\n`)
+        console.log(`\n[c] to clear   [x] to exit\n\n`)
         
                 
         readline.emitKeypressEvents(process.stdin)
@@ -1443,11 +1441,25 @@ Developement:
 
         process.stdin.on('keypress', (chunk, key) => {
             if (key && key.name == 'x') process.exit()
+            if (key && key.name == 'c') console.clear()
         })
     
         return
     }
     
+}
+
+async function startServer({ ports, key, server, options, handler, isHTTPS }) {
+    const isArray = Array.isArray(ports)
+    const port = isArray ? ports.shift() : ports
+    if (port === undefined) return
+    app[key] = server.createServer(options ?? {}, handler)
+    app[key].on('listening', (e) => console.warn(`Listening on http${isHTTPS ? 's' : ''}://localhost:${port}\n`))
+    app[key].on('error', (e) => {
+        console.warn(`Can't listen on port HTTP${isHTTPS ? 'S' : ''} ${port}\n`)
+        if (isArray) return startServer({ ports, key, server, options, handler, isHTTPS })
+    })
+    app[key].listen(port)
 }
 
 async function sections(path, component, file, start=0, onlyTag) {
