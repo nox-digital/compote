@@ -1164,10 +1164,14 @@ Developement:
     && !options.includes('--bypass-build')) {
 
         // Supprime les anciens fichiers compilés (notamment pour les noms de fichiers avec hashage)
-        // if (options.includes('--clean')) {
+        if (!options.includes('--no-clean')) {
             await fs.rm(config.paths.compiled, { recursive: true })
+        }
+
+        // Créer le dossier .compote/compiled si inexistant
+        if (!(await fsSync.existsSync(config.paths.compiled))) {
             await fs.mkdir(config.paths.compiled)
-        // }
+        }
 
         // Compile l'ensemble des components
         if (options.includes('--dist') && !options.includes('--bypass-compile')) {
@@ -2620,7 +2624,8 @@ var copy = ((srcpath, destpath) => {
 
 
 const start = async () => {
-    await envFile('.env')
+    const dotenv = process.env.DOTENV ?? '.env'
+    await envFile(dotenv)
     await configFile()
     if (config.options.pipe) {
         app.pipe = (await import(`${cwd}/${config.options.pipe}`)).pipe
