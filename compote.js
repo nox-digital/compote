@@ -33,8 +33,10 @@ const defaultOptions = {
         closer:     '}',                
 
         // Comment gérer l'expression
-        bypass:     '=',                // <p>hello {=world}</p> => <p>hello {world}<p>
-        unprotected:"*",                // <p>{*markdownToHTML}</p> => <p><h1>C'est "OK"</h1></p> 
+        bypass:     '=',                // hello {=world} => hello {world}
+        bypass_space:  true,            // hello { world } => hello { world }
+        bypass_double: true,            // hello {{world}} => hello {{world}}
+        unprotected:"*",                // {*markdownToHTML} => <h1>C'est "OK"</h1> 
 
         // Injection du slot
         slot:       '…',                // <MonComposant>le slot ici {…MonComposant}</MonComposant>
@@ -1163,14 +1165,16 @@ Developement:
     if ((options.includes('--build-pages') || options.includes('--dist'))
     && !options.includes('--bypass-build')) {
 
-        // Supprime les anciens fichiers compilés (notamment pour les noms de fichiers avec hashage)
-        if (!options.includes('--no-clean')) {
-            await fs.rm(config.paths.compiled, { recursive: true })
-        }
-
         // Créer le dossier .compote/compiled si inexistant
         if (!(await fsSync.existsSync(config.paths.compiled))) {
-            await fs.mkdir(config.paths.compiled)
+            await fs.mkdir(config.paths.compiled, { recursive: true })
+        }
+        else {
+            // Supprime les anciens fichiers compilés (notamment pour les noms de fichiers avec hashage)
+            if (!options.includes('--no-clean')) {
+                await fs.rm(config.paths.compiled, { recursive: true })
+                await fs.mkdir(config.paths.compiled, { recursive: true })
+            }
         }
 
         // Compile l'ensemble des components
@@ -1865,6 +1869,27 @@ async function compileTemplate(start, stop, depth=0, parentTag='') {
             }
         },
     
+        bypass: {
+            _: `${config.syntax.opener}${config.syntax.bypass}`,
+            closer: config.syntax.closer,
+        },
+
+        ...(config.syntax.bypass_double ?
+        {
+            bypassDouble: {
+                _: `${config.syntax.opener}${config.syntax.opener}`,
+                closer: `${config.syntax.closer}${config.syntax.closer}`,
+            },    
+        } : {}),
+
+        ...(config.syntax.bypass_space ?
+        {
+            bypassSpace: {
+                _: `${config.syntax.opener} `,
+                closer: ` ${config.syntax.closer}`,
+            },    
+        } : {}),
+
         expression: {
             _: config.syntax.opener,
 
@@ -1892,13 +1917,7 @@ async function compileTemplate(start, stop, depth=0, parentTag='') {
                 },
             },
             closer: idxExpressionCloser,
-        },
-
-        bypass: {
-            _: `${config.syntax.opener}${config.syntax.bypass}`,
-            closer: config.syntax.closer,
-        },
-    
+        },    
     }
 
     const parts = []
@@ -1998,10 +2017,25 @@ async function compileTemplate(start, stop, depth=0, parentTag='') {
                 start = n.emptyElement.closingEmptyElement.$
                 continue
 
+            // {=x} => {x}
             case 'bypass':
-                n.expression.operator = n.expression._1st
-                push(config.behavior.syntax.opener)
-                start = n.expression.bypass.$
+                n.bypass = n._1st
+                end = start = n.bypass.closer?.$ ?? stop
+                push( config.syntax.opener + slice(n.bypass._ + 2, end) )
+                continue
+
+            // { x } => { x }
+            case 'bypassSpace':
+                n.bypass = n._1st
+                end = start = n.bypass.closer?.$ ?? stop
+                push( slice(n.bypass._, end) )
+                continue
+
+            // {{x}} => {{x}}
+            case 'bypassDouble':
+                n.bypass = n._1st
+                end = start = n.bypass.closer?.$ ?? stop
+                push( slice(n.bypass._, end) )
                 continue
 
             case 'expression':
