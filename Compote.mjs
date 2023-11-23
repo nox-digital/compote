@@ -404,10 +404,10 @@ ___________________________________________________
         ___.prepared++
 
         // Prépare le state
-        if (!('build' in state)) state.build = {}
+        if (!('build' in state)) state.build = { styles: [], scripts: [] }
         if (!('page' in state)) state.page = {}
         if (!(name in state.page)) state.page[name] = {}
-        if (!('scriptVars' in state.page[name])) state.page[name].scriptVars = {}        
+        if (!('scriptVars' in state.page[name])) state.page[name].scriptVars = {}
         for (const f in Compote.fn) {
             if (f === 'env') continue
             state[f] = (...args) => Compote.fn[f](...args)
@@ -428,12 +428,23 @@ ___________________________________________________
             ___.components = {}
             for (const dep in ___.dependencies) {
                 ___.components[dep] = state.components[dep]
+                // if (!(dep in state.config.options.merge)) ___.independentComponents[dep] = ___.components[dep]
             }
 
             // Prépare une fois le composant pour toutes les instances
             if ('prepare' in instance.constructor) {
                 await instance.constructor.prepare(state.env, state.build)
             }
+        }
+        
+        if (newPage) {
+            // Liste des scripts/styles simplifiées
+            for (const cpn in ___.components) {
+                if (!(cpn in state.config.options.merge)) {
+                    state.build.scripts.push( ...(___.components[cpn].___.script) )
+                    state.build.styles.push( ...(___.components[cpn].___.style) )
+                }
+            }            
         }
 
         // Initialise le composant en utilisant les attributs transmis lors de l'instanciation
@@ -452,13 +463,15 @@ ___________________________________________________
 
         // Injecte les données JSON (scriptVars + scriptLabels)
         if (newPage) {
+
+            // Données JSON injectées
             const scripts = []
 
             for (const name in state.components) {
 
                 if (!(name in state.page)) continue
                 const Component = state.components[name]
-                
+
                 const scriptLabels = {}
                 Component.___.scriptLabels.forEach(l => scriptLabels[l] = Component.___.label[state.locale][l])
                 const vars = { ...state.page[name].scriptVars }

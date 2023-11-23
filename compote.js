@@ -1449,7 +1449,10 @@ Developement:
 
         process.stdin.on('keypress', (chunk, key) => {
             if (key && key.name == 'x') process.exit()
-            if (key && key.name == 'c') console.clear()
+            if (key && key.name == 'c') {
+                if (key.ctrl) process.exit()
+                else console.clear()
+            }
         })
     
         return
@@ -1542,6 +1545,8 @@ async function sections(path, component, file, start=0, onlyTag) {
 
                     // fetching method: async / defer 
                     if (['defer', 'async'].includes(name)) slice[name] = true
+
+                    if (['type'].includes(name)) slice[name] = value
                 }
 
                 // Spécifique aux styles
