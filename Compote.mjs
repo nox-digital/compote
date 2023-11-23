@@ -404,7 +404,7 @@ ___________________________________________________
         ___.prepared++
 
         // Prépare le state
-        if (!('build' in state)) state.build = { styles: [], scripts: [] }
+        if (!('build' in state)) state.build = {}
         if (!('page' in state)) state.page = {}
         if (!(name in state.page)) state.page[name] = {}
         if (!('scriptVars' in state.page[name])) state.page[name].scriptVars = {}
@@ -428,25 +428,15 @@ ___________________________________________________
             ___.components = {}
             for (const dep in ___.dependencies) {
                 ___.components[dep] = state.components[dep]
-                // if (!(dep in state.config.options.merge)) ___.independentComponents[dep] = ___.components[dep]
             }
 
             // Prépare une fois le composant pour toutes les instances
             if ('prepare' in instance.constructor) {
                 await instance.constructor.prepare(state.env, state.build)
             }
+    
         }
         
-        if (newPage) {
-            // Liste des scripts/styles simplifiées
-            for (const cpn in ___.components) {
-                if (!(cpn in state.config.options.merge)) {
-                    state.build.scripts.push( ...(___.components[cpn].___.script) )
-                    state.build.styles.push( ...(___.components[cpn].___.style) )
-                }
-            }            
-        }
-
         // Initialise le composant en utilisant les attributs transmis lors de l'instanciation
         if ('init' in instance) await instance.init(state, instance)
 
@@ -493,18 +483,40 @@ ___________________________________________________
         return filename
     }
     
+    static isFile(path) {
+        if (path.at(-1) === '/') return false
+        const parts = path.split('/')
+        return (parts.at(-1).slice(1).indexOf('.') > -1)
+    }
+
+    // Liste des scripts/styles simplifiées
+    static pushAssetsOnce(cpn, ___, state) {
+        const merged = Object.keys(state.config.options.merge).find(meta => state.config.options.merge[meta].includes(cpn))
+        if (merged) return
+        for (const s of ___.script) {
+            if (state._scripts.find(n => n.file_hash === s.file_hash)) continue
+            state._scripts.push(s)
+        }
+        for (const s of ___.style) {
+            if (state._styles.find(n => n.file_hash === s.file_hash)) continue
+            state._styles.push(s)
+        }
+    }
+
 
     static async loadDependencies(Component, loaded, nested=false, state, compiledPath='./') {
-        const isFile = (path) => {
-            if (path.at(-1) === '/') return false
-            const parts = path.split('/')
-            return (parts.at(-1).slice(1).indexOf('.') > -1)
-        }
         
-        const directory = isFile(compiledPath)  ? compiledPath.split('/').slice(0, -1).join('/')
+        const directory = this.isFile(compiledPath)  ? compiledPath.split('/').slice(0, -1).join('/')
                                                 : compiledPath
+
         const components = {}
+        if (!('_scripts' in state)) {
+            state._scripts = []
+            state._styles = []
+        }
+
         components[Component.name] = Component
+        this.pushAssetsOnce(Component.name, Component.___, state)
         for (let dep in Component.___.dependencies) {
             if (!(dep in loaded)) {
                 const dependency = this.ifMetaComponent(Component.___.dependencies[dep].replace('#compiled', ''), state.config)
