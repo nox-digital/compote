@@ -65,6 +65,7 @@ const defaultOptions = {
         pipe: false,
         hashed_filename: true,
         i18n_fallback: '',
+        assets_sort: 'default',
         sitemap: {
             index: 'sitemap.xml'
         }
@@ -563,7 +564,7 @@ async function build(compiledFilePath, attributes, response, request) {
             state.canonical = "${process.env.PUBLIC_DOMAIN ? `https://${process.env.PUBLIC_DOMAIN}${request.url}` : request.url ?? ''}"
 
             state.components[RequestedComponent.name] = RequestedComponent
-            await Compote.loadDependencies(RequestedComponent, state.components, true, state, '${compiledFullPath}')
+            await Compote.loadDependencies(RequestedComponent, state.components, true, state, '${compiledFullPath}', config)
             const requestedComponent = new RequestedComponent(Compote, state, attributes)        
             output = await Compote.build(state, requestedComponent, undefined, true)        
             parentPort.postMessage(output)
@@ -1284,7 +1285,7 @@ Developement:
                     params: {},
                 }
             ]
-            state.components = await Compote.loadDependencies(Component, state.allComponents, true, state, compiledFullPath)
+            state.components = await Compote.loadDependencies(Component, state.allComponents, true, state, compiledFullPath, config)
             console.log(`${page} ${routes.length}x... => ${prefix}`)
 
 

@@ -501,10 +501,11 @@ ___________________________________________________
             if (state._styles.find(n => n.file_hash === s.file_hash)) continue
             state._styles.push(s)
         }
+
     }
 
 
-    static async loadDependencies(Component, loaded, nested=false, state, compiledPath='./') {
+    static async loadDependencies(Component, loaded, nested=false, state, compiledPath='./', config) {
         
         const directory = this.isFile(compiledPath)  ? compiledPath.split('/').slice(0, -1).join('/')
                                                 : compiledPath
@@ -517,6 +518,14 @@ ___________________________________________________
 
         components[Component.name] = Component
         this.pushAssetsOnce(Component.name, Component.___, state)
+        switch (config.options.assets_sort) {
+            case 'fetch': 
+                state._scripts.map(s => s.sort = s.preload ? 0 : ((!s.async && !s.defer) ? 1 : ( s.async ? 2 : 3 ) ))
+                state._scripts.sort((a, b) => a.sort > b.sort ? 1 : ( a.sort < b.sort ? -1 : 0 ))
+                state._styles.map(s => s.sort = s.preload ? 0 : ((!s.async && !s.defer) ? 1 : ( s.async ? 2 : 3 ) ))
+                state._styles.sort((a, b) => a.sort > b.sort ? 1 : ( a.sort < b.sort ? -1 : 0 ))
+                break
+        }
         for (let dep in Component.___.dependencies) {
             if (!(dep in loaded)) {
                 const dependency = this.ifMetaComponent(Component.___.dependencies[dep].replace('#compiled', ''), state.config)
@@ -524,7 +533,7 @@ ___________________________________________________
             }
             components[dep] = loaded[dep]
             if (nested && Component.name != loaded[dep].name) {
-                const subComponents = await this.loadDependencies(loaded[dep], loaded, true, state, directory)
+                const subComponents = await this.loadDependencies(loaded[dep], loaded, true, state, directory, config)
                 for (const c in subComponents) components[c] = subComponents[c]
             }
         }
