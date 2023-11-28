@@ -560,7 +560,7 @@ async function build(compiledFilePath, attributes, response, request) {
 
             const env = {}
             Object.keys(process.env).filter(k => k.startsWith('PUBLIC_')).map(k => env[k] = process.env[k])
-            const state = { dev: ${app.dev ? 'true' : 'false'}, env, locale: env.PUBLIC_LANG || 'fr', components: {}, config }
+            const state = { dev: ${app.dev ? 'true' : 'false'}, env, locale: env.PUBLIC_LANG || 'fr', components: {}, allComponents: {}, _scripts: [], _styles: [], config }
             state.canonical = "${process.env.PUBLIC_DOMAIN ? `https://${process.env.PUBLIC_DOMAIN}${request.url}` : request.url ?? ''}"
 
             state.components[RequestedComponent.name] = RequestedComponent
@@ -1195,7 +1195,7 @@ Developement:
             Object.assign(Compote.fn, config.customFunctions)
         }
 
-        const state = { env, locale: env.PUBLIC_LANG || 'fr', components: {}, allComponents: {}, config }
+        const state = { env, locale: env.PUBLIC_LANG || 'fr', components: {}, allComponents: {}, _scripts: [], _styles: [], config }
         
         const mkdirCreated = []
         let output = ''
@@ -1285,6 +1285,8 @@ Developement:
                     params: {},
                 }
             ]
+            state._scripts = []
+            state._styles = []
             state.components = await Compote.loadDependencies(Component, state.allComponents, true, state, compiledFullPath, config)
             console.log(`${page} ${routes.length}x... => ${prefix}`)
 
