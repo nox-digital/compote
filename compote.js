@@ -176,16 +176,28 @@ const envValueInterpolation = (str, name) => {
 }
 
 const configFile = async () => {
+    const env = process.env
     Object.assign(config, defaultOptions)
-
-    let content = null
-    try {
-        content = fsSync.readFileSync(new URL(`${cwd}/compote.json`, import.meta.url), { encoding: 'utf-8'})
-    }
-    catch (e) { 
-        return false 
-    }
+    const configPath = env.COMPOTE_JSON || `${cwd}/compote.json`
     
+    // Load the config file only if exists
+    let content = null
+    if (fsSync.existsSync(configPath)) {
+        if (env.COMPOTE_JSON) console.log(`Custom configuration path « ${configPath} » `)
+                
+        try {
+            content = fsSync.readFileSync(new URL(configPath, import.meta.url), { encoding: 'utf-8'})
+            if (!content) throw new Error()
+        }
+        catch (e) { 
+            console.error(`${configPath} format invalid`)
+            console.log({ content: content })
+            process.exit(1)
+            return false 
+        }
+    }
+
+    // Config file is optionnal
     if (content === null) return
         
     let conf = {}
@@ -221,7 +233,7 @@ const configFile = async () => {
 
     }
     catch (e) {
-        console.error(`compote.json format invalid`)
+        console.error(`${configPath} format invalid`)
         process.exit(1)
     }
 
@@ -688,6 +700,66 @@ async function integrity(content, algo='sha256') {
     }
 }
 
+function compoteHelpAndVersion(args=[]) {
+    const options = args.filter(a => a.startsWith('--'))
+    if (!args.length || options.includes('--help') || options.includes('--version')) {
+
+        version()
+
+        if (options.includes('--version')) {
+            console.log(`COMPOTE version ${compoteVersion}`)
+            process.exit(0)
+        }
+
+        console.log(`
+
+COMPOTE version ${compoteVersion}
+
+
+Compilation:
+------------
+
+    By component:
+    npx compote --compile ./src/Component.html ./compiled/ 
+
+    By folder:
+    npx compote --compile ./src/ ./compiled/
+
+    Compile folder and watch changes to auto-compilation: 
+    npx compote --watch ./src/ ./compiled/
+
+
+Build:
+------
+
+    By file with optional JSON parameters:
+    npx compote --build ./compiled/Component.tpl.mjs ./build/index.html {json}
+
+    Build all pages, based on .env file or folder:
+    npx compote --build-pages ./compiled/ ./build/
+
+
+Distribution:
+-------------
+
+    Compilation and build all pages 
+    npx compote --dist ./src/ ./compiled/ ./build/
+    
+    Options:
+    --test              Launch a static web server to test
+    --mv-public         Move public/ folder rather copying files
+                        To use only in temporary virtual machine
+
+
+Developement:
+------------
+    Development web server with auto-compilation and building based on .env file or folder:
+    npx compote --dev ./src/ ./compiled/
+        `)
+        process.exit(1)
+    }
+}
+
 async function compote(args=[]) {
 
     const startTime = new Date()
@@ -759,65 +831,6 @@ async function compote(args=[]) {
             process.exit(1)
         }
     }
-
-
-    if (!args.length || options.includes('--help') || options.includes('--version')) {
-
-        version()
-
-        if (options.includes('--version')) {
-            console.log(`COMPOTE version ${compoteVersion}`)
-            process.exit(0)
-        }
-
-        console.log(`
-
-COMPOTE version ${compoteVersion}
-
-
-Compilation:
-------------
-
-    By component:
-    npx compote --compile ./src/Component.html ./compiled/ 
-
-    By folder:
-    npx compote --compile ./src/ ./compiled/
-
-    Compile folder and watch changes to auto-compilation: 
-    npx compote --watch ./src/ ./compiled/
-
-
-Build:
-------
-
-    By file with optional JSON parameters:
-    npx compote --build ./compiled/Component.tpl.mjs ./build/index.html {json}
-
-    Build all pages, based on .env file or folder:
-    npx compote --build-pages ./compiled/ ./build/
-
-
-Distribution:
--------------
-
-    Compilation and build all pages 
-    npx compote --dist ./src/ ./compiled/ ./build/
-    
-    Options:
-    --test              Launch a static web server to test
-    --mv-public         Move public/ folder rather copying files
-                        To use only in temporary virtual machine
-
-
-Developement:
-------------
-    Development web server with auto-compilation and building based on .env file or folder:
-    npx compote --dev ./src/ ./compiled/
-        `)
-        process.exit(1)
-    }
-
 
 
     // ==================================================================
@@ -1014,7 +1027,7 @@ Developement:
 
         // Gère les chemins d'accès à ses composants
         for (const dep in dependencies) {
-            dependencies[dep] = `#compiled/${dep}.tpl.mjs`
+            dependencies[dep] = `${dep}.tpl.mjs` // `#compiled/${dep}.tpl.mjs`
             // const exists = await fs.stat(dependencies[dep])
                 // .catch(e => console.warn(`\x1b[31mDependence ${dep} not found\x1b[0m `))
         }
@@ -2666,12 +2679,14 @@ var copy = ((srcpath, destpath) => {
 
 
 const start = async () => {
+    const args = process.argv.slice(2)
+    compoteHelpAndVersion(args)
     const dotenv = process.env.DOTENV ?? '.env'
     await envFile(dotenv)
     await configFile()
     if (config.options.pipe) {
         app.pipe = (await import(`${cwd}/${config.options.pipe}`)).pipe
     }
-    compote(process.argv.slice(2))
+    compote(args)
 }
 start()

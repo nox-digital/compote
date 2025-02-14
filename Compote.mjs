@@ -507,9 +507,8 @@ ___________________________________________________
 
     static async loadDependencies(Component, loaded, nested=false, state, compiledPath='./', config) {
         
-        const directory = this.isFile(compiledPath)  ? compiledPath.split('/').slice(0, -1).join('/')
-                                                : compiledPath
-
+        const directory = this.isFile(compiledPath)  ? compiledPath.split('/').slice(0, -1).join('/') + '/'
+                                                : (compiledPath.at(-1) == '/' ? compiledPath : compiledPath + '/')
         const components = {}
         if (!('_scripts' in state)) {
             state._scripts = []
@@ -528,8 +527,9 @@ ___________________________________________________
         }
         for (let dep in Component.___.dependencies) {
             if (!(dep in loaded)) {
-                const dependency = this.ifMetaComponent(Component.___.dependencies[dep].replace('#compiled', ''), state.config)
-                loaded[dep] = (await import(`${directory}/${dependency}`)).default
+                //const dependency = this.ifMetaComponent(Component.___.dependencies[dep].replace('#compiled', ''), state.config)
+                const dependency = this.ifMetaComponent(Component.___.dependencies[dep], state.config)
+                loaded[dep] = (await import(`${directory}${dependency}`)).default
             }
             components[dep] = loaded[dep]
             if (nested && Component.name != loaded[dep].name) {
