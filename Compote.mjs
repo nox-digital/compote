@@ -485,8 +485,11 @@ ___________________________________________________
     
     static isFile(path) {
         if (path.at(-1) === '/') return false
-        const parts = path.split('/')
-        return (parts.at(-1).slice(1).indexOf('.') > -1)
+        const idxDot = path.lastIndexOf('.')
+        if (idxDot === -1) return false
+        const ext = path.slice(idxDot + 1)
+        if (!['html','css','js','mjs'].includes(ext)) return false
+        return true
     }
 
     // Liste des scripts/styles simplifiées

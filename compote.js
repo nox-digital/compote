@@ -823,7 +823,7 @@ async function compote(args=[]) {
         if (config.paths.src) srcPath = config.paths.src
         if (config.paths.compiled) compiledPath = config.paths.compiled
         if (config.paths.dist) distPath = config.paths.dist
-    
+
         if (('srcPath' in required && !srcPath)
         || ('compiledPath' in required && !compiledPath)
         || ('distPath' in required && !distPath)) {
